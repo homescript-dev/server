@@ -1,0 +1,61 @@
+# Binaries
+homescript-server
+db
+frigate-test
+config/*
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# Dependency directories
+vendor/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Data directories
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Configuration (keep structure, ignore content)
+config/devices/devices.yaml
+config/events/**/*.lua
+
+# Keep example structure
+!config/events/.gitkeep
+!examples/**
+
+# Mosquitto data
+mosquitto/data/
+mosquitto/log/
+
+# Zigbee2MQTT data
+zigbee2mqtt/
+!zigbee2mqtt/.gitkeep
+
+# Docker
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
