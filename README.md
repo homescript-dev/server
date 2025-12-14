@@ -128,6 +128,13 @@ config/events/
         └── handler.lua
 ```
 
+**Hot-reload**: Script changes are detected instantly - no server restart needed. Simply edit and save your Lua scripts.
+
+**Dynamic time events**: 
+- Any wildcard pattern `*_XX` works (e.g., `*_17` triggers every hour at XX:17)
+- Any sunrise/sunset offset works (e.g., `sunrise/-01_45` = 1h45m before sunrise)
+- Sunrise/sunset times are recalculated daily based on your location
+
 **Note**: Timers created with `timer.after()`, `timer.at()`, or `timer.every()` use callback functions and don't require files.
 
 ### Example: Turn on light when switch is pressed

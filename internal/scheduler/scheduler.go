@@ -67,7 +67,7 @@ func New(router *events.Router, cfg Config) *Scheduler {
 		longitude:  cfg.Longitude,
 		lastMinute: -1,
 		lastHour:   -1,
-		lastDay:    now.Day(), // Initialize with current day to prevent duplicate calculation
+		lastDay:    now.Day(),
 		timers:     make(map[string]*Timer),
 	}
 
@@ -102,7 +102,7 @@ func (s *Scheduler) run() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	logger.Debug("Scheduler ticker started, checking time events every second")
+	logger.Debug("Scheduler ticker started, checking events every second")
 
 	for {
 		select {
@@ -110,17 +110,20 @@ func (s *Scheduler) run() {
 			logger.Debug("Scheduler received stop signal")
 			return
 		case now := <-ticker.C:
-			s.checkTimeEvents(now)
+			// Check timers every second (they need 1-second precision)
+			s.checkTimers(now)
+
+			// Check time events only at second 0 (minute precision)
+			if now.Second() == 0 {
+				s.checkTimeEvents(now)
+			}
 		}
 	}
 }
 
 func (s *Scheduler) checkTimeEvents(now time.Time) {
-	now = now.In(s.location)
-
 	minute := now.Minute()
 	hour := now.Hour()
-	second := now.Second()
 	day := now.Day()
 	weekday := int(now.Weekday())
 
@@ -130,89 +133,63 @@ func (s *Scheduler) checkTimeEvents(now time.Time) {
 		s.updateSunTimes(now)
 	}
 
-	// Only trigger minute-based events when second = 0 (start of minute)
-	// This prevents triggering on startup if server starts mid-minute
-	if second != 0 {
-		return
-	}
-
-	// Every minute event (*_* wildcard)
 	if minute != s.lastMinute {
 		s.lastMinute = minute
 
-		// Wildcard: *_* - every minute
-		s.triggerEvent("*_*", now, weekday)
+		// Check and trigger wildcard: *_* (every minute)
+		s.checkAndTrigger("*_*", now, weekday)
 
-		// Legacy: every_minute (deprecated but keep for compatibility)
-		s.triggerEvent("every_minute", now, weekday)
+		// Check and trigger wildcard: *_XX (every hour at specific minute)
+		s.checkAndTrigger(fmt.Sprintf("*_%02d", minute), now, weekday)
 
-		// Wildcard: *_00 - every hour (at XX:00)
-		if minute == 0 {
-			s.triggerEvent("*_00", now, weekday)
+		// Check and trigger wildcard: HH_* (every minute of specific hour)
+		s.checkAndTrigger(fmt.Sprintf("%02d_*", hour), now, weekday)
+
+		// Check and trigger custom time: HH_MM
+		s.checkAndTrigger(fmt.Sprintf("%02d_%02d", hour, minute), now, weekday)
+
+		// Check and trigger sunrise
+		if !s.sunriseTime.IsZero() && hour == s.sunriseTime.Hour() && minute == s.sunriseTime.Minute() {
+			if s.checkAndTrigger("sunrise", now, weekday) {
+				logger.Info("Sunrise at %02d:%02d", hour, minute)
+			}
 		}
 
-		// Wildcard: *_15, *_30, *_45 - every hour at specific minute
-		wildcardMinute := fmt.Sprintf("*_%02d", minute)
-		s.triggerEvent(wildcardMinute, now, weekday)
-
-		// Custom time events in format HH_MM (e.g., 17_05 for 17:05)
-		customTime := fmt.Sprintf("%02d_%02d", hour, minute)
-		s.triggerEvent(customTime, now, weekday)
-
-		// Check for sunrise (within the same minute)
-		if !s.sunriseTime.IsZero() &&
-			hour == s.sunriseTime.Hour() &&
-			minute == s.sunriseTime.Minute() {
-			logger.Info("Sunrise at %02d:%02d", hour, minute)
-			s.triggerEvent("sunrise", now, weekday)
+		// Check and trigger sunset
+		if !s.sunsetTime.IsZero() && hour == s.sunsetTime.Hour() && minute == s.sunsetTime.Minute() {
+			if s.checkAndTrigger("sunset", now, weekday) {
+				logger.Info("Sunset at %02d:%02d", hour, minute)
+			}
 		}
 
-		// Check for sunset (within the same minute)
-		if !s.sunsetTime.IsZero() &&
-			hour == s.sunsetTime.Hour() &&
-			minute == s.sunsetTime.Minute() {
-			logger.Info("Sunset at %02d:%02d", hour, minute)
-			s.triggerEvent("sunset", now, weekday)
-		}
-
-		// Check for sunrise/sunset offset times
-		s.checkSunOffsetEvents(now)
+		// Check sunrise/sunset offsets
+		s.checkSunOffsetEvents(now, hour, minute, weekday)
 	}
 
-	// Every hour event (at XX:00)
 	if hour != s.lastHour && minute == 0 {
 		s.lastHour = hour
-		s.triggerEvent("every_hour", now, weekday)
+		s.checkAndTrigger("every_hour", now, weekday)
 	}
-
-	// Check dynamic timers
-	s.checkTimers(now)
 }
 
 // checkSunOffsetEvents checks for sunrise/sunset offset events
-// Formats: -00_30 (30 min before), +01_30 (1 hour 30 min after)
-func (s *Scheduler) checkSunOffsetEvents(now time.Time) {
+func (s *Scheduler) checkSunOffsetEvents(now time.Time, hour, minute, weekday int) {
 	if s.sunriseTime.IsZero() || s.sunsetTime.IsZero() {
 		return
 	}
 
-	hour := now.Hour()
-	minute := now.Minute()
-
-	// Check sunrise subdirectories
 	sunrisePath := filepath.Join(s.router.GetBasePath(), "events", "time", "sunrise")
-	s.checkOffsetDirectory(sunrisePath, s.sunriseTime, hour, minute, now.Weekday())
+	s.checkOffsetDirectory(sunrisePath, s.sunriseTime, now, hour, minute, weekday)
 
-	// Check sunset subdirectories
 	sunsetPath := filepath.Join(s.router.GetBasePath(), "events", "time", "sunset")
-	s.checkOffsetDirectory(sunsetPath, s.sunsetTime, hour, minute, now.Weekday())
+	s.checkOffsetDirectory(sunsetPath, s.sunsetTime, now, hour, minute, weekday)
 }
 
 // checkOffsetDirectory checks for offset time directories under sunrise/sunset
-func (s *Scheduler) checkOffsetDirectory(basePath string, baseTime time.Time, currentHour, currentMinute int, weekday time.Weekday) {
+func (s *Scheduler) checkOffsetDirectory(basePath string, baseTime, now time.Time, currentHour, currentMinute, weekday int) {
 	entries, err := os.ReadDir(basePath)
 	if err != nil {
-		return // Directory doesn't exist or not readable
+		return
 	}
 
 	for _, entry := range entries {
@@ -246,13 +223,17 @@ func (s *Scheduler) checkOffsetDirectory(basePath string, baseTime time.Time, cu
 
 		// Check if current time matches
 		if targetTime.Hour() == currentHour && targetTime.Minute() == currentMinute {
-			// Trigger event with full path
 			eventPath := fmt.Sprintf("sunrise/%s", name)
 			if filepath.Base(basePath) == "sunset" {
 				eventPath = fmt.Sprintf("sunset/%s", name)
 			}
-			s.triggerEvent(eventPath, time.Now(), int(weekday))
-			logger.Info("Triggered offset event: %s at %02d:%02d", eventPath, currentHour, currentMinute)
+
+			// Check if handler script exists
+			scriptPath := filepath.Join(basePath, name, "handler.lua")
+			if _, err := os.Stat(scriptPath); err == nil {
+				s.triggerEvent(eventPath, now, weekday)
+				logger.Info("Triggered offset event: %s at %02d:%02d", eventPath, currentHour, currentMinute)
+			}
 		}
 	}
 }
@@ -358,21 +339,19 @@ func (s *Scheduler) ListTimers() []string {
 // updateSunTimes calculates sunrise and sunset times for the given day
 func (s *Scheduler) updateSunTimes(now time.Time) {
 	if s.latitude == 0 && s.longitude == 0 {
-		// No coordinates configured, use fixed times as fallback
-		logger.Warn("No latitude/longitude configured, using fixed sunrise/sunset times (06:30/18:30)")
-		s.sunriseTime = time.Date(now.Year(), now.Month(), now.Day(), 6, 30, 0, 0, s.location)
-		s.sunsetTime = time.Date(now.Year(), now.Month(), now.Day(), 18, 30, 0, 0, s.location)
+		logger.Error("Cannot calculate sunrise/sunset: no coordinates available")
+		s.sunriseTime = time.Time{}
+		s.sunsetTime = time.Time{}
 		return
 	}
 
-	// Calculate actual sunrise and sunset
 	sunrise, sunset := sunrise.SunriseSunset(
 		s.latitude, s.longitude,
 		now.Year(), now.Month(), now.Day(),
 	)
 
-	s.sunriseTime = sunrise.In(s.location)
-	s.sunsetTime = sunset.In(s.location)
+	s.sunriseTime = sunrise
+	s.sunsetTime = sunset
 
 	logger.Info("Calculated sun times for %s: sunrise %02d:%02d, sunset %02d:%02d",
 		now.Format("2006-01-02"),
@@ -401,4 +380,16 @@ func (s *Scheduler) triggerEvent(eventType string, now time.Time, weekday int) {
 
 	logger.Debug("Triggering time event: %s at %02d:%02d:%02d", eventType, now.Hour(), now.Minute(), now.Second())
 	s.router.RouteEvent(event)
+}
+
+// checkAndTrigger checks if script exists and triggers event if it does
+func (s *Scheduler) checkAndTrigger(eventType string, now time.Time, weekday int) bool {
+	timeBasePath := filepath.Join(s.router.GetBasePath(), "events", "time")
+	scriptPath := filepath.Join(timeBasePath, eventType, "handler.lua")
+
+	if _, err := os.Stat(scriptPath); err == nil {
+		s.triggerEvent(eventType, now, weekday)
+		return true
+	}
+	return false
 }

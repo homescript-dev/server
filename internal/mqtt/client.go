@@ -55,8 +55,7 @@ func NewClient(cfg Config, router *events.Router, dm *devices.Manager) (*Client,
 	}
 
 	opts.SetAutoReconnect(true)
-	opts.SetConnectRetry(false) // Disable retry during initial connection
-	opts.SetConnectRetryInterval(5 * time.Second)
+	opts.SetMaxReconnectInterval(60 * time.Second)
 	opts.SetConnectTimeout(10 * time.Second)
 	opts.SetWriteTimeout(10 * time.Second)
 	opts.SetPingTimeout(10 * time.Second)
