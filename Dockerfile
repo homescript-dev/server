@@ -1,4 +1,4 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24.1-alpine AS builder
 
 WORKDIR /app
 
@@ -23,7 +23,7 @@ RUN apk --no-cache add ca-certificates tzdata
 WORKDIR /root/
 
 # Copy binary
-COPY --from=builder /app/smarthome-server .
+COPY --from=builder /app/homescript-server .
 
 # Create directories
 RUN mkdir -p /config/devices /config/events /data
@@ -31,4 +31,4 @@ RUN mkdir -p /config/devices /config/events /data
 # Expose no ports (MQTT client only)
 
 # Default command
-CMD ["./smarthome-server", "run"]
+CMD ["./homescript-server", "run"]
