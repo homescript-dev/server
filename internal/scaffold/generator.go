@@ -357,14 +357,24 @@ func generateTimeScaffolds(basePath string) error {
 			template:    generateSunsetScript(),
 		},
 		{
-			name:        "every_minute",
-			description: "Triggered every minute",
-			template:    generateEveryMinuteScript(),
+			name:        "*_*",
+			description: "Wildcard: Every minute",
+			template:    generateWildcardEveryMinuteScript(),
 		},
 		{
-			name:        "every_hour",
-			description: "Triggered every hour",
-			template:    generateEveryHourScript(),
+			name:        "*_00",
+			description: "Wildcard: Every hour at XX:00",
+			template:    generateWildcardEveryHourScript(),
+		},
+		{
+			name:        "*_15",
+			description: "Wildcard: Every hour at XX:15",
+			template:    generateWildcardQuarterScript(),
+		},
+		{
+			name:        "*_30",
+			description: "Wildcard: Every hour at XX:30",
+			template:    generateWildcardHalfHourScript(),
 		},
 	}
 
@@ -377,6 +387,54 @@ func generateTimeScaffolds(basePath string) error {
 		scriptPath := filepath.Join(eventPath, "handler.lua")
 		if !fileExists(scriptPath) {
 			if err := os.WriteFile(scriptPath, []byte(timeEvent.template), 0644); err != nil {
+				return err
+			}
+			logger.Debug("Created: %s", scriptPath)
+		}
+	}
+
+	// Create sunrise offset examples
+	sunriseOffsets := []struct {
+		offset   string
+		template string
+	}{
+		{"-00_30", generateSunriseOffsetScript("-00_30", "30 minutes BEFORE")},
+		{"+00_15", generateSunriseOffsetScript("+00_15", "15 minutes AFTER")},
+	}
+
+	for _, offset := range sunriseOffsets {
+		offsetPath := filepath.Join(timeBasePath, "sunrise", offset.offset)
+		if err := os.MkdirAll(offsetPath, 0755); err != nil {
+			return err
+		}
+
+		scriptPath := filepath.Join(offsetPath, "handler.lua")
+		if !fileExists(scriptPath) {
+			if err := os.WriteFile(scriptPath, []byte(offset.template), 0644); err != nil {
+				return err
+			}
+			logger.Debug("Created: %s", scriptPath)
+		}
+	}
+
+	// Create sunset offset examples
+	sunsetOffsets := []struct {
+		offset   string
+		template string
+	}{
+		{"-00_15", generateSunsetOffsetScript("-00_15", "15 minutes BEFORE")},
+		{"+01_30", generateSunsetOffsetScript("+01_30", "1 hour 30 minutes AFTER")},
+	}
+
+	for _, offset := range sunsetOffsets {
+		offsetPath := filepath.Join(timeBasePath, "sunset", offset.offset)
+		if err := os.MkdirAll(offsetPath, 0755); err != nil {
+			return err
+		}
+
+		scriptPath := filepath.Join(offsetPath, "handler.lua")
+		if !fileExists(scriptPath) {
+			if err := os.WriteFile(scriptPath, []byte(offset.template), 0644); err != nil {
 				return err
 			}
 			logger.Debug("Created: %s", scriptPath)
@@ -498,5 +556,94 @@ event.data = {
 ` + "```" + `
 
 Use standard Lua ` + "`os.date()`" + ` and ` + "`os.time()`" + ` functions for additional time logic.
+`
+}
+
+func generateWildcardEveryMinuteScript() string {
+	return `-- Wildcard: Every minute (*_*)
+-- Triggered every minute at second 0
+-- Useful for frequent checks or monitoring
+
+log.info("⏱️  Minute tick: " .. os.date("%H:%M:%S"))
+
+-- Example: Check temperature every minute
+-- local temp = device.get("temp_sensor").temperature
+-- if temp > 30 then
+--     log.warn("High temperature: " .. temp)
+-- end
+`
+}
+
+func generateWildcardEveryHourScript() string {
+	return `-- Wildcard: Every hour at XX:00 (*_00)
+-- Triggered every hour when minute = 0
+
+local hour = tonumber(os.date("%H"))
+log.info("🕐 Hour tick: " .. hour .. ":00")
+
+-- Example: Night mode check
+-- if hour >= 22 or hour < 6 then
+--     log.info("Night mode active")
+--     device.set("cameras", {mode = "night"})
+-- else
+--     log.info("Day mode active")
+--     device.set("cameras", {mode = "day"})
+-- end
+`
+}
+
+func generateWildcardQuarterScript() string {
+	return `-- Wildcard: Every hour at XX:15 (*_15)
+-- Triggered every hour when minute = 15
+
+log.info("🕐 Quarter past: " .. os.date("%H:%M"))
+
+-- Example: Periodic check
+-- local status = device.get("system").status
+-- log.info("Status check: " .. status)
+`
+}
+
+func generateWildcardHalfHourScript() string {
+	return `-- Wildcard: Every hour at XX:30 (*_30)
+-- Triggered every hour when minute = 30
+
+log.info("🕐 Half hour: " .. os.date("%H:%M"))
+
+-- Example: Save energy statistics
+-- local power = device.get("meter").power
+-- state.set("power.reading_" .. os.time(), power)
+`
+}
+
+func generateSunriseOffsetScript(offset, description string) string {
+	return `-- Sunrise offset: ` + offset + ` (` + description + ` sunrise)
+-- Format: -HH_MM (before) or +HH_MM (after)
+-- Triggered ` + description + ` calculated sunrise time
+
+log.info("🌅 ` + description + ` sunrise event")
+
+-- Example: Gradual morning wake-up
+-- device.set("bedroom_lamp", {state = "ON", brightness = 10})
+-- 
+-- timer.after(300, function()  -- After 5 minutes
+--     device.set("bedroom_lamp", {brightness = 50})
+-- end)
+`
+}
+
+func generateSunsetOffsetScript(offset, description string) string {
+	return `-- Sunset offset: ` + offset + ` (` + description + ` sunset)
+-- Format: -HH_MM (before) or +HH_MM (after)
+-- Triggered ` + description + ` calculated sunset time
+
+log.info("🌆 ` + description + ` sunset event")
+
+-- Example: Pre-sunset preparation
+-- device.set("outside_lights", {state = "ON", brightness = 50})
+-- 
+-- timer.after(600, function()  -- After 10 minutes
+--     device.set("outside_lights", {brightness = 255})
+-- end)
 `
 }

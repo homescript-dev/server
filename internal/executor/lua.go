@@ -407,56 +407,119 @@ func (e *Executor) fromLuaValue(value lua.LValue) interface{} {
 	}
 }
 
+// Helper functions
+
+// dumpFunction dumps a Lua function to bytecode using string.dump
+func dumpFunction(L *lua.LState, fn *lua.LFunction) ([]byte, error) {
+	// Push string.dump function
+	L.GetGlobal("string")
+	stringTable := L.Get(-1)
+	L.Pop(1)
+
+	if tbl, ok := stringTable.(*lua.LTable); ok {
+		dump := L.GetField(tbl, "dump")
+		if dumpFn, ok := dump.(*lua.LFunction); ok {
+			// Call string.dump(fn)
+			L.Push(dumpFn)
+			L.Push(fn)
+			if err := L.PCall(1, 1, nil); err != nil {
+				return nil, err
+			}
+
+			result := L.Get(-1)
+			L.Pop(1)
+
+			if str, ok := result.(lua.LString); ok {
+				return []byte(string(str)), nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("failed to dump function")
+}
+
 // Timer functions
 
 // timerAfter schedules a timer to run after specified duration
-// Usage: timer.after(60, "timer_id", "path/to/script.lua")
+// Usage: timer.after(60, callback) or timer.after(60, "timer_id", callback)
 func (e *Executor) timerAfter(L *lua.LState) int {
 	if e.scheduler == nil {
 		logger.Warn("[LUA] Scheduler not available for timer.after")
-		L.Push(lua.LFalse)
+		L.Push(lua.LNil)
 		return 1
 	}
 
 	seconds := L.CheckNumber(1)
-	timerID := L.CheckString(2)
-	scriptPath := L.OptString(3, "")
+
+	var timerID string
+	var callback *lua.LFunction
+
+	// Check if second arg is string (custom ID) or function (callback)
+	if L.GetTop() >= 3 {
+		// timer.after(seconds, "id", callback)
+		timerID = L.CheckString(2)
+		callback = L.CheckFunction(3)
+	} else {
+		// timer.after(seconds, callback) - auto-generate ID
+		callback = L.CheckFunction(2)
+		timerID = fmt.Sprintf("timer_%d", time.Now().UnixNano())
+	}
+
+	// Dump callback function to bytecode
+	bytecode, err := dumpFunction(L, callback)
+	if err != nil {
+		logger.Error("[LUA] Failed to dump callback: %v", err)
+		L.Push(lua.LNil)
+		return 1
+	}
 
 	// Type assertion to get scheduler methods
 	type schedulerInterface interface {
-		AddTimer(id string, triggerTime time.Time, scriptPath string)
+		AddTimerCallback(id string, triggerTime time.Time, callback []byte)
 	}
 
 	if sched, ok := e.scheduler.(schedulerInterface); ok {
 		triggerTime := time.Now().Add(time.Duration(seconds) * time.Second)
-		sched.AddTimer(timerID, triggerTime, scriptPath)
-		L.Push(lua.LTrue)
+		sched.AddTimerCallback(timerID, triggerTime, bytecode)
+		L.Push(lua.LString(timerID))
 	} else {
 		logger.Error("[LUA] Scheduler type assertion failed")
-		L.Push(lua.LFalse)
+		L.Push(lua.LNil)
 	}
 
 	return 1
 }
 
 // timerAt schedules a timer at specific time (HH:MM format)
-// Usage: timer.at("17:30", "timer_id", "path/to/script.lua")
+// Usage: timer.at("17:30", callback) or timer.at("17:30", "timer_id", callback)
 func (e *Executor) timerAt(L *lua.LState) int {
 	if e.scheduler == nil {
 		logger.Warn("[LUA] Scheduler not available for timer.at")
-		L.Push(lua.LFalse)
+		L.Push(lua.LNil)
 		return 1
 	}
 
 	timeStr := L.CheckString(1)
-	timerID := L.CheckString(2)
-	scriptPath := L.OptString(3, "")
+
+	var timerID string
+	var callback *lua.LFunction
+
+	// Check if second arg is string (custom ID) or function (callback)
+	if L.GetTop() >= 3 {
+		// timer.at("17:30", "id", callback)
+		timerID = L.CheckString(2)
+		callback = L.CheckFunction(3)
+	} else {
+		// timer.at("17:30", callback) - auto-generate ID
+		callback = L.CheckFunction(2)
+		timerID = fmt.Sprintf("timer_%d", time.Now().UnixNano())
+	}
 
 	// Parse HH:MM format
 	var hour, minute int
 	if _, err := fmt.Sscanf(timeStr, "%d:%d", &hour, &minute); err != nil {
 		logger.Error("[LUA] Invalid time format: %s (expected HH:MM)", timeStr)
-		L.Push(lua.LFalse)
+		L.Push(lua.LNil)
 		return 1
 	}
 
@@ -468,45 +531,73 @@ func (e *Executor) timerAt(L *lua.LState) int {
 		triggerTime = triggerTime.Add(24 * time.Hour)
 	}
 
+	// Dump callback function to bytecode
+	bytecode, err := dumpFunction(L, callback)
+	if err != nil {
+		logger.Error("[LUA] Failed to dump callback: %v", err)
+		L.Push(lua.LNil)
+		return 1
+	}
+
 	type schedulerInterface interface {
-		AddTimer(id string, triggerTime time.Time, scriptPath string)
+		AddTimerCallback(id string, triggerTime time.Time, callback []byte)
 	}
 
 	if sched, ok := e.scheduler.(schedulerInterface); ok {
-		sched.AddTimer(timerID, triggerTime, scriptPath)
-		L.Push(lua.LTrue)
+		sched.AddTimerCallback(timerID, triggerTime, bytecode)
+		L.Push(lua.LString(timerID))
 	} else {
 		logger.Error("[LUA] Scheduler type assertion failed")
-		L.Push(lua.LFalse)
+		L.Push(lua.LNil)
 	}
 
 	return 1
 }
 
 // timerEvery creates a recurring timer
-// Usage: timer.every(300, "timer_id", "path/to/script.lua")
+// Usage: timer.every(300, callback) or timer.every(300, "timer_id", callback)
 func (e *Executor) timerEvery(L *lua.LState) int {
 	if e.scheduler == nil {
 		logger.Warn("[LUA] Scheduler not available for timer.every")
-		L.Push(lua.LFalse)
+		L.Push(lua.LNil)
 		return 1
 	}
 
 	seconds := L.CheckNumber(1)
-	timerID := L.CheckString(2)
-	scriptPath := L.OptString(3, "")
+
+	var timerID string
+	var callback *lua.LFunction
+
+	// Check if second arg is string (custom ID) or function (callback)
+	if L.GetTop() >= 3 {
+		// timer.every(300, "id", callback)
+		timerID = L.CheckString(2)
+		callback = L.CheckFunction(3)
+	} else {
+		// timer.every(300, callback) - auto-generate ID
+		callback = L.CheckFunction(2)
+		timerID = fmt.Sprintf("timer_%d", time.Now().UnixNano())
+	}
+
+	// Dump callback function to bytecode
+	bytecode, err := dumpFunction(L, callback)
+	if err != nil {
+		logger.Error("[LUA] Failed to dump callback: %v", err)
+		L.Push(lua.LNil)
+		return 1
+	}
 
 	type schedulerInterface interface {
-		AddRecurringTimer(id string, interval time.Duration, scriptPath string)
+		AddRecurringTimerCallback(id string, interval time.Duration, callback []byte)
 	}
 
 	if sched, ok := e.scheduler.(schedulerInterface); ok {
 		interval := time.Duration(seconds) * time.Second
-		sched.AddRecurringTimer(timerID, interval, scriptPath)
-		L.Push(lua.LTrue)
+		sched.AddRecurringTimerCallback(timerID, interval, bytecode)
+		L.Push(lua.LString(timerID))
 	} else {
 		logger.Error("[LUA] Scheduler type assertion failed")
-		L.Push(lua.LFalse)
+		L.Push(lua.LNil)
 	}
 
 	return 1

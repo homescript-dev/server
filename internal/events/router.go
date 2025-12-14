@@ -23,6 +23,11 @@ func New(basePath string, pool *executor.Pool) *Router {
 	}
 }
 
+// GetBasePath returns the base path for event scripts
+func (r *Router) GetBasePath() string {
+	return r.basePath
+}
+
 // RouteEvent finds and executes scripts for the given event
 func (r *Router) RouteEvent(event *types.Event) {
 	scripts := r.findScripts(event)

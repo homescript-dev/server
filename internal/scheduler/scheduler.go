@@ -5,6 +5,8 @@ import (
 	"homescript-server/internal/events"
 	"homescript-server/internal/logger"
 	"homescript-server/internal/types"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -134,12 +136,26 @@ func (s *Scheduler) checkTimeEvents(now time.Time) {
 		return
 	}
 
-	// Every minute event
+	// Every minute event (*_* wildcard)
 	if minute != s.lastMinute {
 		s.lastMinute = minute
+
+		// Wildcard: *_* - every minute
+		s.triggerEvent("*_*", now, weekday)
+
+		// Legacy: every_minute (deprecated but keep for compatibility)
 		s.triggerEvent("every_minute", now, weekday)
 
-		// Also trigger custom time events in format HH_MM (e.g., 17_05 for 17:05)
+		// Wildcard: *_00 - every hour (at XX:00)
+		if minute == 0 {
+			s.triggerEvent("*_00", now, weekday)
+		}
+
+		// Wildcard: *_15, *_30, *_45 - every hour at specific minute
+		wildcardMinute := fmt.Sprintf("*_%02d", minute)
+		s.triggerEvent(wildcardMinute, now, weekday)
+
+		// Custom time events in format HH_MM (e.g., 17_05 for 17:05)
 		customTime := fmt.Sprintf("%02d_%02d", hour, minute)
 		s.triggerEvent(customTime, now, weekday)
 
@@ -158,6 +174,9 @@ func (s *Scheduler) checkTimeEvents(now time.Time) {
 			logger.Info("Sunset at %02d:%02d", hour, minute)
 			s.triggerEvent("sunset", now, weekday)
 		}
+
+		// Check for sunrise/sunset offset times
+		s.checkSunOffsetEvents(now)
 	}
 
 	// Every hour event (at XX:00)
@@ -168,6 +187,74 @@ func (s *Scheduler) checkTimeEvents(now time.Time) {
 
 	// Check dynamic timers
 	s.checkTimers(now)
+}
+
+// checkSunOffsetEvents checks for sunrise/sunset offset events
+// Formats: -00_30 (30 min before), +01_30 (1 hour 30 min after)
+func (s *Scheduler) checkSunOffsetEvents(now time.Time) {
+	if s.sunriseTime.IsZero() || s.sunsetTime.IsZero() {
+		return
+	}
+
+	hour := now.Hour()
+	minute := now.Minute()
+
+	// Check sunrise subdirectories
+	sunrisePath := filepath.Join(s.router.GetBasePath(), "events", "time", "sunrise")
+	s.checkOffsetDirectory(sunrisePath, s.sunriseTime, hour, minute, now.Weekday())
+
+	// Check sunset subdirectories
+	sunsetPath := filepath.Join(s.router.GetBasePath(), "events", "time", "sunset")
+	s.checkOffsetDirectory(sunsetPath, s.sunsetTime, hour, minute, now.Weekday())
+}
+
+// checkOffsetDirectory checks for offset time directories under sunrise/sunset
+func (s *Scheduler) checkOffsetDirectory(basePath string, baseTime time.Time, currentHour, currentMinute int, weekday time.Weekday) {
+	entries, err := os.ReadDir(basePath)
+	if err != nil {
+		return // Directory doesn't exist or not readable
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+
+		// Parse offset format: -00_30 or +01_30
+		if len(name) < 6 || (name[0] != '-' && name[0] != '+') {
+			continue
+		}
+
+		sign := name[0]
+		timeStr := name[1:]
+
+		var offsetHour, offsetMinute int
+		if _, err := fmt.Sscanf(timeStr, "%02d_%02d", &offsetHour, &offsetMinute); err != nil {
+			continue
+		}
+
+		// Calculate offset in minutes
+		offsetMinutes := offsetHour*60 + offsetMinute
+		if sign == '-' {
+			offsetMinutes = -offsetMinutes
+		}
+
+		// Calculate target time
+		targetTime := baseTime.Add(time.Duration(offsetMinutes) * time.Minute)
+
+		// Check if current time matches
+		if targetTime.Hour() == currentHour && targetTime.Minute() == currentMinute {
+			// Trigger event with full path
+			eventPath := fmt.Sprintf("sunrise/%s", name)
+			if filepath.Base(basePath) == "sunset" {
+				eventPath = fmt.Sprintf("sunset/%s", name)
+			}
+			s.triggerEvent(eventPath, time.Now(), int(weekday))
+			logger.Info("Triggered offset event: %s at %02d:%02d", eventPath, currentHour, currentMinute)
+		}
+	}
 }
 
 // checkTimers checks and triggers any due timers

@@ -1,15 +1,15 @@
-# HomeScript Server
+# Homescript Server
 
-Event-driven automation server for Zigbee2MQTT devices with Lua scripting.
+Event-driven automation server for MQTT-speaking devices with Lua scripting.
 
 ## Features
 
-- 🔍 **Automatic device discovery** from Zigbee2MQTT
-- 📝 **Lua-based event scripting** for flexible automation
-- 🔄 **MQTT integration** (native TCP on port 1883)
-- 💾 **Persistent state storage** using bbolt
-- ⚡ **Event-driven architecture** with worker pool
-- 🔧 **Hot-reload Lua scripts**
+- **Automatic device discovery** from Zigbee2MQTT
+- **Lua-based event scripting** for flexible automation
+- **MQTT integration** (native TCP on port 1883)
+- **Persistent state storage** using bbolt
+- **Event-driven architecture** with worker pool
+- **Instantly available Lua scripts' changes**
 
 ## Quick Start
 
@@ -29,8 +29,6 @@ This will (completes in ~2-3 seconds):
 - Discover Frigate NVR cameras (if available)
 - Generate `config/devices/devices.yaml`
 - Create Lua script scaffolds in `config/events/`
-
-**Note:** Discovery is fast! Frigate cameras are discovered instantly via `frigate/camera_activity` trigger.
 
 ### 2. Run Server
 
@@ -68,18 +66,9 @@ listener 1883
 protocol mqtt
 allow_anonymous true
 
-# WebSocket support (optional)
-listener 8880
-protocol websockets
-allow_anonymous true
-
 # Logging
 log_dest stdout
 log_type all
-
-# Persistence
-persistence true
-persistence_location /mosquitto/data/
 ```
 
 ### Devices Configuration
@@ -125,11 +114,15 @@ config/events/
 └── time/
     ├── sunrise/
     │   └── handler.lua
+    │   └── -00_30    # 30 minutes before sunrise
+		│		   └── handler.lua
     ├── sunset/
     │   └── handler.lua
-    ├── every_minute/
+    │   └── +01_30    # 1 hour 30 minutes after sunset
+		│		   └── handler.lua
+    ├── *_*/          # Every minute
     │   └── handler.lua
-    ├── every_hour/
+    ├── *_00/         # Every hour
     │   └── handler.lua
     └── <HH_MM>/      # Custom times (e.g., 07_00, 17_30)
         └── handler.lua
@@ -216,9 +209,16 @@ if new_state == "ON" then
     
     -- Save turn-on time
     state.set("porch.last_on", os.time())
-    
-    -- Schedule auto-off (you'd need to implement timer events)
-    -- For now, this is handled in a separate time event script
+
+    timer.after(300,  "porch_auto_off", function()
+        local last_on = state.get("porch.last_on")
+        if last_on and os.time() - last_on >= 300 then
+            device.set("porch", {state = "OFF"})
+            log.info("Porch light auto-turned OFF after 5 minutes")
+        else
+            log.info("Porch light was turned ON again, skipping auto-off")
+        end
+    end) 
 end
 ```
 
