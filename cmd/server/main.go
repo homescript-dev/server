@@ -190,7 +190,7 @@ func runServer() error {
 	deviceManager := devices.New(mqttClient.GetInternalClient(), deviceConfig.Devices)
 
 	// Initialize executor with device manager and storage
-	exec := executor.New(store, deviceManager)
+	exec := executor.New(store, deviceManager, configPath)
 	pool := executor.NewPool(exec, 10, 100)
 	pool.Start()
 	defer pool.Stop()

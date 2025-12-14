@@ -345,13 +345,14 @@ func (s *Scheduler) updateSunTimes(now time.Time) {
 		return
 	}
 
+	// SunriseSunset returns UTC time, convert to local
 	sunrise, sunset := sunrise.SunriseSunset(
 		s.latitude, s.longitude,
 		now.Year(), now.Month(), now.Day(),
 	)
 
-	s.sunriseTime = sunrise
-	s.sunsetTime = sunset
+	s.sunriseTime = sunrise.Local()
+	s.sunsetTime = sunset.Local()
 
 	logger.Info("Calculated sun times for %s: sunrise %02d:%02d, sunset %02d:%02d",
 		now.Format("2006-01-02"),

@@ -6,18 +6,19 @@ import (
 	"homescript-server/internal/logger"
 	"homescript-server/internal/storage"
 	"homescript-server/internal/types"
+	"path/filepath"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
 )
 
 // Executor manages Lua script execution
-// Executor manages Lua script execution
 type Executor struct {
 	storage       *storage.Storage
 	deviceManager DeviceManager
 	scheduler     interface{} // Scheduler interface to avoid circular dependency
 	scriptTimeout time.Duration
+	configPath    string // Base path for config directory
 }
 
 // DeviceManager interface for device operations
@@ -28,12 +29,13 @@ type DeviceManager interface {
 }
 
 // New creates a new Executor
-func New(store *storage.Storage, dm DeviceManager) *Executor {
+func New(store *storage.Storage, dm DeviceManager, configPath string) *Executor {
 	return &Executor{
 		storage:       store,
 		deviceManager: dm,
 		scheduler:     nil,
 		scriptTimeout: 5 * time.Second,
+		configPath:    configPath,
 	}
 }
 
@@ -54,7 +56,8 @@ func (e *Executor) Execute(scriptPath string, event *types.Event) error {
 	L.SetContext(ctx)
 
 	// Add config/lib to Lua package path for helper libraries
-	configLibPath := "./config/lib/?.lua;./config/lib/?/init.lua"
+	libPath := filepath.Join(e.configPath, "lib")
+	configLibPath := fmt.Sprintf("%s/?.lua;%s/?/init.lua", libPath, libPath)
 	if err := L.DoString(fmt.Sprintf(`package.path = package.path .. ";%s"`, configLibPath)); err != nil {
 		logger.Warn("Failed to set Lua package path: %v", err)
 	}
@@ -92,7 +95,8 @@ func (e *Executor) ExecuteCallback(bytecode []byte, timerID string) error {
 	L.SetContext(ctx)
 
 	// Add config/lib to Lua package path
-	configLibPath := "./config/lib/?.lua;./config/lib/?/init.lua"
+	libPath := filepath.Join(e.configPath, "lib")
+	configLibPath := fmt.Sprintf("%s/?.lua;%s/?/init.lua", libPath, libPath)
 	if err := L.DoString(fmt.Sprintf(`package.path = package.path .. ";%s"`, configLibPath)); err != nil {
 		logger.Warn("Failed to set Lua package path: %v", err)
 	}

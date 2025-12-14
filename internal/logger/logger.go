@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 )
 
 // Level represents logging level
@@ -58,7 +59,8 @@ func Init(level Level, useColors bool) {
 
 // New creates a new Logger
 func New(level Level, output io.Writer, useColors bool) *Logger {
-	flags := log.Ldate | log.Ltime
+	// Use empty flags - we'll add timestamp manually with local time
+	flags := 0
 
 	return &Logger{
 		level:       level,
@@ -128,12 +130,16 @@ func (l *Logger) log(level Level, format string, v ...interface{}) {
 		return
 	}
 
+	// Format with local time
+	now := time.Now()
+	timestamp := now.Format("2006/01/02 15:04:05")
+
 	levelName := levelNames[level]
-	prefix := fmt.Sprintf("[%s] ", levelName)
+	prefix := fmt.Sprintf("%s [%s] ", timestamp, levelName)
 
 	if l.useColors {
 		color := levelColors[level]
-		prefix = color + prefix + colorReset
+		prefix = timestamp + " " + color + fmt.Sprintf("[%s]", levelName) + colorReset + " "
 	}
 
 	message := fmt.Sprintf(format, v...)
