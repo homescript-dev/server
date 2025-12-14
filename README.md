@@ -490,7 +490,7 @@ Flags:
 ## Docker Support
 
 ```dockerfile
-FROM golang:1.21 as builder
+FROM golang:1.24.1 as builder
 WORKDIR /build
 COPY . .
 RUN go build -o homescript-server ./cmd/server
