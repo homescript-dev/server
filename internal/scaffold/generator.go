@@ -11,6 +11,11 @@ import (
 
 // GenerateScaffolds creates the directory structure and script templates
 func GenerateScaffolds(devices []*types.Device, basePath string) error {
+	// Generate helper libraries
+	if err := generateHelpers(basePath); err != nil {
+		logger.Warn("Failed to generate helper libraries: %v", err)
+	}
+
 	// Generate device scaffolds
 	for _, dev := range devices {
 		if err := generateDeviceScaffold(dev, basePath); err != nil {
@@ -645,5 +650,309 @@ log.info("🌆 ` + description + ` sunset event")
 -- timer.after(600, function()  -- After 10 minutes
 --     device.set("outside_lights", {brightness = 255})
 -- end)
+`
+}
+
+func generateHelpers(basePath string) error {
+	libPath := filepath.Join(basePath, "lib")
+	if err := os.MkdirAll(libPath, 0755); err != nil {
+		return err
+	}
+
+	// Generate frigate_helpers.lua
+	frigateHelperPath := filepath.Join(libPath, "frigate_helpers.lua")
+	if !fileExists(frigateHelperPath) {
+		if err := os.WriteFile(frigateHelperPath, []byte(getFrigateHelperContent()), 0644); err != nil {
+			return err
+		}
+		logger.Debug("Created: %s", frigateHelperPath)
+	}
+
+	// Generate color_helpers.lua
+	colorHelperPath := filepath.Join(libPath, "color_helpers.lua")
+	if !fileExists(colorHelperPath) {
+		if err := os.WriteFile(colorHelperPath, []byte(getColorHelperContent()), 0644); err != nil {
+			return err
+		}
+		logger.Debug("Created: %s", colorHelperPath)
+	}
+
+	return nil
+}
+
+func getFrigateHelperContent() string {
+	return `-- Frigate Camera Helpers
+-- Helper functions for working with Frigate NVR camera events
+
+local frigate = {}
+
+-- Parse and log detected objects with details
+function frigate.log_objects(objects)
+    if not objects or type(objects) ~= "table" then
+        return
+    end
+
+    for _, obj in ipairs(objects) do
+        local info = string.format(
+            "Detected: %s (confidence: %.1f%%, area: %d, zone: %s)",
+            obj.label or "unknown",
+            (obj.score or 0) * 100,
+            obj.area or 0,
+            obj.current_zones and table.concat(obj.current_zones, ", ") or "none"
+        )
+        log.info(info)
+    end
+end
+
+-- Check if specific object type was detected
+function frigate.has_object(objects, object_type)
+    if not objects or type(objects) ~= "table" then
+        return false
+    end
+
+    for _, obj in ipairs(objects) do
+        if obj.label == object_type then
+            return true
+        end
+    end
+    return false
+end
+
+-- Get object with highest confidence
+function frigate.get_best_object(objects)
+    if not objects or type(objects) ~= "table" or #objects == 0 then
+        return nil
+    end
+
+    local best = objects[1]
+    for _, obj in ipairs(objects) do
+        if (obj.score or 0) > (best.score or 0) then
+            best = obj
+        end
+    end
+    return best
+end
+
+-- Filter objects by confidence threshold
+function frigate.filter_by_confidence(objects, min_confidence)
+    if not objects or type(objects) ~= "table" then
+        return {}
+    end
+
+    local filtered = {}
+    for _, obj in ipairs(objects) do
+        if (obj.score or 0) >= min_confidence then
+            table.insert(filtered, obj)
+        end
+    end
+    return filtered
+end
+
+-- Filter objects by type
+function frigate.filter_by_type(objects, object_type)
+    if not objects or type(objects) ~= "table" then
+        return {}
+    end
+
+    local filtered = {}
+    for _, obj in ipairs(objects) do
+        if obj.label == object_type then
+            table.insert(filtered, obj)
+        end
+    end
+    return filtered
+end
+
+-- Check if object is in specific zone
+function frigate.in_zone(obj, zone_name)
+    if not obj or not obj.current_zones then
+        return false
+    end
+
+    for _, zone in ipairs(obj.current_zones) do
+        if zone == zone_name then
+            return true
+        end
+    end
+    return false
+end
+
+-- Get objects in specific zone
+function frigate.get_objects_in_zone(objects, zone_name)
+    if not objects or type(objects) ~= "table" then
+        return {}
+    end
+
+    local filtered = {}
+    for _, obj in ipairs(objects) do
+        if frigate.in_zone(obj, zone_name) then
+            table.insert(filtered, obj)
+        end
+    end
+    return filtered
+end
+
+-- Format object info for logging
+function frigate.format_object(obj)
+    if not obj then
+        return "nil"
+    end
+
+    local parts = {}
+    table.insert(parts, obj.label or "unknown")
+
+    if obj.score then
+        table.insert(parts, string.format("%.1f%%", obj.score * 100))
+    end
+
+    if obj.area then
+        table.insert(parts, string.format("area=%d", obj.area))
+    end
+
+    if obj.current_zones and #obj.current_zones > 0 then
+        table.insert(parts, "zones=[" .. table.concat(obj.current_zones, ",") .. "]")
+    end
+
+    return table.concat(parts, " ")
+end
+
+-- Describe camera activity in human-readable format
+function frigate.describe_activity(data)
+    local parts = {}
+
+    if data.motion == true then
+        table.insert(parts, "motion detected")
+    end
+
+    if data.objects and #data.objects > 0 then
+        local obj_summary = {}
+        for _, obj in ipairs(data.objects) do
+            table.insert(obj_summary, obj.label or "unknown")
+        end
+        table.insert(parts, string.format("%d object(s): %s",
+            #data.objects, table.concat(obj_summary, ", ")))
+    end
+
+    if #parts == 0 then
+        return "no activity"
+    end
+
+    return table.concat(parts, "; ")
+end
+
+-- Check if this is a new detection
+function frigate.is_new_detection(new_objects, old_objects)
+    if not new_objects or #new_objects == 0 then
+        return false
+    end
+
+    if not old_objects or #old_objects == 0 then
+        return true
+    end
+
+    return #new_objects > #old_objects
+end
+
+-- Get camera activity summary for state tracking
+function frigate.get_activity_summary(data)
+    local summary = {
+        timestamp = os.time(),
+        motion = data.motion or false,
+        object_count = (data.objects and #data.objects) or 0,
+        objects = {}
+    }
+
+    if data.objects then
+        for _, obj in ipairs(data.objects) do
+            table.insert(summary.objects, {
+                label = obj.label,
+                score = obj.score,
+                zones = obj.current_zones
+            })
+        end
+    end
+
+    return summary
+end
+
+return frigate
+`
+}
+
+func getColorHelperContent() string {
+	return `-- Color Helper Library
+-- Helper functions for working with color values in various formats
+
+local color = {}
+
+-- Convert XY to RGB
+function color.xy_to_rgb(x, y, brightness)
+    brightness = brightness or 255
+    local z = 1.0 - x - y
+    local Y = brightness / 255.0
+    local X = (Y / y) * x
+    local Z = (Y / y) * z
+
+    local r = X * 1.656492 - Y * 0.354851 - Z * 0.255038
+    local g = -X * 0.707196 + Y * 1.655397 + Z * 0.036152
+    local b = X * 0.051713 - Y * 0.121364 + Z * 1.011530
+
+    r = r <= 0.0031308 and 12.92 * r or (1.0 + 0.055) * math.pow(r, (1.0 / 2.4)) - 0.055
+    g = g <= 0.0031308 and 12.92 * g or (1.0 + 0.055) * math.pow(g, (1.0 / 2.4)) - 0.055
+    b = b <= 0.0031308 and 12.92 * b or (1.0 + 0.055) * math.pow(b, (1.0 / 2.4)) - 0.055
+
+    local function clamp(v)
+        return math.max(0, math.min(255, math.floor(v * 255 + 0.5)))
+    end
+
+    return clamp(r), clamp(g), clamp(b)
+end
+
+-- Convert XY to HSV
+function color.xy_to_hsv(x, y)
+    local r, g, b = color.xy_to_rgb(x, y, 255)
+    r, g, b = r / 255, g / 255, b / 255
+
+    local max = math.max(r, g, b)
+    local min = math.min(r, g, b)
+    local delta = max - min
+
+    local h, s, v = 0, 0, max
+
+    if delta > 0 then
+        s = delta / max
+
+        if r == max then
+            h = ((g - b) / delta) % 6
+        elseif g == max then
+            h = (b - r) / delta + 2
+        else
+            h = (r - g) / delta + 4
+        end
+
+        h = h * 60
+        if h < 0 then h = h + 360 end
+    end
+
+    return math.floor(h + 0.5), math.floor(s * 100 + 0.5), math.floor(v * 100 + 0.5)
+end
+
+-- Describe color in human-readable format
+function color.describe_color(color_value)
+    if type(color_value) ~= "table" then
+        return tostring(color_value)
+    end
+
+    if color_value.x and color_value.y then
+        local h, s, v = color.xy_to_hsv(color_value.x, color_value.y)
+        return string.format("HSV(h=%d°, s=%d%%, v=%d%%)", h, s, v)
+    elseif color_value.hue and color_value.saturation then
+        return string.format("HS(h=%d, s=%d)", color_value.hue or 0, color_value.saturation or 0)
+    end
+
+    return "Unknown color format"
+end
+
+return color
 `
 }
