@@ -510,7 +510,7 @@ docker run -d \
   -v $(pwd)/config:/config \
   -v $(pwd)/data:/data \
   -v /etc/localtime:/etc/localtime:ro \
-  homescript-server run \
+  /root/homescript-server run \
   --mqtt-broker tcp://192.168.1.47:1883 \
   --config /config \
   --db /data/state.db
