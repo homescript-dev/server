@@ -99,38 +99,6 @@ func (m *Manager) Set(id string, attrs map[string]interface{}) error {
 	return nil
 }
 
-// Call executes an action on a device
-func (m *Manager) Call(id string, action string, params map[string]interface{}) error {
-	// Convert action to state change
-	switch action {
-	case "turn_on":
-		return m.Set(id, map[string]interface{}{"state": "ON"})
-	case "turn_off":
-		return m.Set(id, map[string]interface{}{"state": "OFF"})
-	case "toggle":
-		state, err := m.Get(id)
-		if err != nil {
-			return err
-		}
-		currentState, ok := state["state"].(string)
-		if !ok {
-			currentState = "OFF"
-		}
-		newState := "ON"
-		if currentState == "ON" {
-			newState = "OFF"
-		}
-		return m.Set(id, map[string]interface{}{"state": newState})
-	default:
-		// Generic action - merge params
-		if params == nil {
-			params = make(map[string]interface{})
-		}
-		params["action"] = action
-		return m.Set(id, params)
-	}
-}
-
 // UpdateState updates the cached state of a device
 func (m *Manager) UpdateState(id string, state map[string]interface{}) {
 	m.mu.Lock()

@@ -136,6 +136,8 @@ func (s *Scheduler) checkTimeEvents(now time.Time) {
 	if minute != s.lastMinute {
 		s.lastMinute = minute
 
+		logger.Debug("Minute changed: %02d:%02d, checking time events", hour, minute)
+
 		// Check and trigger wildcard: *_* (every minute)
 		s.checkAndTrigger("*_*", now, weekday)
 
@@ -389,6 +391,7 @@ func (s *Scheduler) checkAndTrigger(eventType string, now time.Time, weekday int
 	scriptPath := filepath.Join(timeBasePath, eventType, "handler.lua")
 
 	if _, err := os.Stat(scriptPath); err == nil {
+		logger.Debug("Time event triggered: %s", eventType)
 		s.triggerEvent(eventType, now, weekday)
 		return true
 	}

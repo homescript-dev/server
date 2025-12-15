@@ -6,6 +6,7 @@ import (
 	"homescript-server/internal/logger"
 	"homescript-server/internal/storage"
 	"homescript-server/internal/types"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -25,7 +26,6 @@ type Executor struct {
 type DeviceManager interface {
 	Get(id string) (map[string]interface{}, error)
 	Set(id string, attrs map[string]interface{}) error
-	Call(id string, action string, params map[string]interface{}) error
 }
 
 // New creates a new Executor
@@ -286,10 +286,35 @@ func (e *Executor) deviceCall(L *lua.LState) int {
 		})
 	}
 
-	if err := e.deviceManager.Call(id, action, params); err != nil {
-		logger.Error("Failed to call action %s on %s: %v", action, id, err)
+	// Execute action script directly: config/events/device/{id}/actions/{action}.lua
+	scriptPath := filepath.Join(e.configPath, "events", "device", id, "actions", action+".lua")
+
+	// Check if script exists
+	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+		logger.Error("Action script not found: %s (device: %s, action: %s)", scriptPath, id, action)
+		L.Push(lua.LFalse)
+		return 1
 	}
-	return 0
+
+	// Create action event
+	event := &types.Event{
+		Source:    "action",
+		Type:      "call",
+		Device:    id,
+		Attribute: action,
+		Data:      params,
+		Timestamp: time.Now(),
+	}
+
+	// Execute action script in new Lua state
+	if err := e.Execute(scriptPath, event); err != nil {
+		logger.Error("Failed to execute action %s on %s: %v", action, id, err)
+		L.Push(lua.LFalse)
+		return 1
+	}
+
+	L.Push(lua.LTrue)
+	return 1
 }
 
 // Log functions
