@@ -8,6 +8,7 @@ import (
 	"homescript-server/internal/types"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
@@ -72,8 +73,18 @@ func (e *Executor) Execute(scriptPath string, event *types.Event) error {
 		logger.Warn("Failed to load Frigate helpers: %v", err)
 	}
 
+	// Set SCRIPT_DIR global variable (directory of current script)
+	scriptDir := filepath.Dir(scriptPath)
+	L.SetGlobal("SCRIPT_DIR", lua.LString(scriptDir))
+
+	// Set SCRIPT_PATH global variable (full path to current script)
+	L.SetGlobal("SCRIPT_PATH", lua.LString(scriptPath))
+
 	// Register API functions
 	e.registerAPI(L, event)
+
+	// Register DoSiblings helper
+	e.registerDoSiblings(L, scriptPath, event)
 
 	// Execute script
 	if err := L.DoFile(scriptPath); err != nil {
@@ -206,6 +217,58 @@ func (e *Executor) registerAPI(L *lua.LState, event *types.Event) {
 	L.SetField(timerTable, "cancel", L.NewFunction(e.timerCancel))
 	L.SetField(timerTable, "list", L.NewFunction(e.timerList))
 	L.SetGlobal("timer", timerTable)
+}
+
+// registerDoSiblings registers the DoSiblings helper function
+func (e *Executor) registerDoSiblings(L *lua.LState, currentScript string, event *types.Event) {
+	// Create closure with current script path and event
+	doSiblings := L.NewFunction(func(L *lua.LState) int {
+		scriptDir := filepath.Dir(currentScript)
+		currentScriptName := filepath.Base(currentScript)
+
+		// Read directory
+		entries, err := os.ReadDir(scriptDir)
+		if err != nil {
+			logger.Error("DoSiblings: failed to read directory %s: %v", scriptDir, err)
+			L.Push(lua.LFalse)
+			return 1
+		}
+
+		executed := 0
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+
+			name := entry.Name()
+
+			// Skip non-Lua files
+			if !strings.HasSuffix(name, ".lua") {
+				continue
+			}
+
+			// Skip current script (avoid infinite recursion)
+			if name == currentScriptName {
+				continue
+			}
+
+			siblingPath := filepath.Join(scriptDir, name)
+			logger.Debug("DoSiblings: executing %s", siblingPath)
+
+			// Execute sibling script with same event
+			if err := e.Execute(siblingPath, event); err != nil {
+				logger.Error("DoSiblings: failed to execute %s: %v", siblingPath, err)
+			} else {
+				executed++
+			}
+		}
+
+		logger.Debug("DoSiblings: executed %d sibling scripts", executed)
+		L.Push(lua.LNumber(executed))
+		return 1
+	})
+
+	L.SetGlobal("DoSiblings", doSiblings)
 }
 
 // State functions
