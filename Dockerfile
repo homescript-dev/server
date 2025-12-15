@@ -30,9 +30,6 @@ COPY --from=builder /app/homescript-server .
 # Create directories
 RUN mkdir -p /config/devices /config/events /data
 
-# Set timezone (can be overridden with -e TZ=Europe/Madrid)
-ENV TZ=UTC
-
 # Expose no ports (MQTT client only)
 
 # Default command
