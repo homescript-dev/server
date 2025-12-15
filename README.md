@@ -504,83 +504,32 @@ docker build -t homescript-server .
 
 ### Running
 
-**With timezone from host system:**
-
 ```bash
 docker run -d \
   --name homescript-server \
   -v $(pwd)/config:/config \
   -v $(pwd)/data:/data \
   -v /etc/localtime:/etc/localtime:ro \
-  -v /etc/timezone:/etc/timezone:ro \
   homescript-server run \
   --mqtt-broker tcp://192.168.1.47:1883 \
   --config /config \
   --db /data/state.db
 ```
 
-**With specific timezone:**
-
-```bash
-docker run -d \
-  --name homescript-server \
-  -e TZ=Europe/Madrid \
-  -v $(pwd)/config:/config \
-  -v $(pwd)/data:/data \
-  homescript-server run \
-  --mqtt-broker tcp://192.168.1.47:1883 \
-  --config /config \
-  --db /data/state.db
-```
-
-**Available timezone values:**
-- `Europe/Madrid`
-- `America/New_York`
-- `Asia/Tokyo`
-- `UTC` (default)
-- See full list: `timedatectl list-timezones`
 
 ### Docker Compose
 
 ```yaml
-version: '3.8'
-
 services:
   homescript-server:
-    image: ghcr.io/<username>/homescript-server:stable
+    image: ghcr.io/homescript-dev/homescript-server:stable
     container_name: homescript-server
     restart: unless-stopped
-    environment:
-      - TZ=Europe/Madrid
     volumes:
-      - ./config:/config
-      - ./data:/data
-      # Or use host timezone:
-      # - /etc/localtime:/etc/localtime:ro
-      # - /etc/timezone:/etc/timezone:ro
-    command: >
-      run
-      --mqtt-broker tcp://192.168.1.47:1883
-      --config /config
-      --db /data/state.db
-      --latitude 40.4168
-      --longitude -3.7038
-```
-
-### Example Dockerfile
-
-```dockerfile
-FROM golang:1.24.1 as builder
-WORKDIR /build
-COPY . .
-RUN go build -o homescript-server ./cmd/server
-
-FROM alpine:latest
-RUN apk add --no-cache ca-certificates tzdata
-ENV TZ=UTC
-COPY --from=builder /build/homescript-server /usr/local/bin/
-ENTRYPOINT ["homescript-server"]
-CMD ["run"]
+      - ./config:/app/config
+      - ./data:/app/data
+      - /etc/localtime:/etc/localtime:ro
+    command: "/root/homescript-server run --mqtt-broker tcp://mosquitto:1883 --config /app/config --db /app/data/db"
 ```
 
 ## Troubleshooting
@@ -598,7 +547,6 @@ If logs show incorrect time in Docker:
    ```bash
    docker run \
      -v /etc/localtime:/etc/localtime:ro \
-     -v /etc/timezone:/etc/timezone:ro \
      ...
    ```
 
