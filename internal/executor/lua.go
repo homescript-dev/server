@@ -6,6 +6,7 @@ import (
 	"homescript-server/internal/logger"
 	"homescript-server/internal/storage"
 	"homescript-server/internal/types"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -224,6 +225,11 @@ func (e *Executor) registerAPI(L *lua.LState, event *types.Event) {
 	L.SetField(timerTable, "cancel", L.NewFunction(e.timerCancel))
 	L.SetField(timerTable, "list", L.NewFunction(e.timerList))
 	L.SetGlobal("timer", timerTable)
+
+	// UDP send function
+	udpTable := L.NewTable()
+	L.SetField(udpTable, "send", L.NewFunction(e.udpSend))
+	L.SetGlobal("udp", udpTable)
 }
 
 // registerDoSiblings registers the DoSiblings helper function
@@ -404,6 +410,62 @@ func (e *Executor) logError(L *lua.LState) int {
 	msg := L.CheckString(1)
 	logger.Error("[LUA] %s", msg)
 	return 0
+}
+
+// UDP send function
+// UdpSend(message, [host], [port])
+// message — required: Lua string (can be text or binary, with \0 etc.)
+// host    — optional, string, default "127.0.0.1"
+// port    — optional, number, default 8125
+// Returns: true/nil on success, false + error on failure
+func (e *Executor) udpSend(L *lua.LState) int {
+	// Check first argument — must be string (text or binary)
+	if L.GetTop() < 1 {
+		L.ArgError(1, "message expected")
+		return 0
+	}
+	messageLua := L.CheckString(1) // Safe for binary strings!
+	data := []byte(messageLua)     // Convert to []byte — works with any bytes including \0
+
+	// Host (optional)
+	host := "127.0.0.1"
+	if L.GetTop() >= 2 {
+		host = L.CheckString(2)
+	}
+
+	// Port (optional)
+	port := 8125
+	if L.GetTop() >= 3 {
+		port = int(L.CheckNumber(3))
+	}
+
+	// Resolve address
+	addr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(host, fmt.Sprintf("%d", port)))
+	if err != nil {
+		L.Push(lua.LBool(false))
+		L.Push(lua.LString("resolve error: " + err.Error()))
+		return 2
+	}
+
+	// Send
+	conn, err := net.DialUDP("udp", nil, addr)
+	if err != nil {
+		L.Push(lua.LBool(false))
+		L.Push(lua.LString("dial error: " + err.Error()))
+		return 2
+	}
+	defer conn.Close()
+
+	_, err = conn.Write(data)
+	if err != nil {
+		L.Push(lua.LBool(false))
+		L.Push(lua.LString("write error: " + err.Error()))
+		return 2
+	}
+
+	L.Push(lua.LBool(true))
+	L.Push(lua.LNil)
+	return 2
 }
 
 // Helper functions
