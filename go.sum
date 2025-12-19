@@ -11,6 +11,8 @@ github.com/ip2location/ip2location-go/v9 v9.8.0 h1:drPzGjj1EBl45I33ErMHFtIfsQ3mR
 github.com/ip2location/ip2location-go/v9 v9.8.0/go.mod h1:MPLnsKxwQlvd2lBNcQCsLoyzJLDBFizuO67wXXdzoyI=
 github.com/nathan-osman/go-sunrise v1.1.0 h1:ZqZmtmtzs8Os/DGQYi0YMHpuUqR/iRoJK+wDO0wTCw8=
 github.com/nathan-osman/go-sunrise v1.1.0/go.mod h1:RcWqhT+5ShCZDev79GuWLayetpJp78RSjSWxiDowmlM=
+github.com/nubix-io/gluasocket v0.0.0-20191219185455-6c63b949f5b0 h1:EftASqceCcFx/RYw33H5boEOP0wZNMRVk1wcGud43f4=
+github.com/nubix-io/gluasocket v0.0.0-20191219185455-6c63b949f5b0/go.mod h1:hiBSKDuoDm2duG2i/8IJjRFhzXyFkg35FX0HOfEBPlQ=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=

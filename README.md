@@ -115,11 +115,11 @@ config/events/
     ├── sunrise/
     │   └── handler.lua
     │   └── -00_30    # 30 minutes before sunrise
-		│		   └── handler.lua
+    │		   └── handler.lua
     ├── sunset/
     │   └── handler.lua
     │   └── +01_30    # 1 hour 30 minutes after sunset
-		│		   └── handler.lua
+    │		   └── handler.lua
     ├── *_*/          # Every minute
     │   └── handler.lua
     ├── *_00/         # Every hour

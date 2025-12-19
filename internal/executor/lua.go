@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nubix-io/gluasocket"
 	lua "github.com/yuin/gopher-lua"
 )
 
@@ -73,6 +74,9 @@ func (e *Executor) Execute(scriptPath string, event *types.Event) error {
 		logger.Warn("Failed to load Frigate helpers: %v", err)
 	}
 
+	// Load socket library for network operations (HTTP, TCP, UDP)
+	gluasocket.Preload(L)
+
 	// Set SCRIPT_DIR global variable (directory of current script)
 	scriptDir := filepath.Dir(scriptPath)
 	L.SetGlobal("SCRIPT_DIR", lua.LString(scriptDir))
@@ -121,6 +125,9 @@ func (e *Executor) ExecuteCallback(bytecode []byte, timerID string) error {
 	if err := L.DoString(`frigate = require("frigate_helpers")`); err != nil {
 		logger.Warn("Failed to load Frigate helpers: %v", err)
 	}
+
+	// Load socket library for network operations (HTTP, TCP, UDP)
+	gluasocket.Preload(L)
 
 	// Create a minimal event for timer callback
 	event := &types.Event{

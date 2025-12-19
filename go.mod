@@ -15,6 +15,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/ip2location/ip2location-go/v9 v9.8.0 // indirect
 	github.com/nathan-osman/go-sunrise v1.1.0 // indirect
+	github.com/nubix-io/gluasocket v0.0.0-20191219185455-6c63b949f5b0 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
 	golang.org/x/net v0.19.0 // indirect
 	golang.org/x/sync v0.10.0 // indirect
