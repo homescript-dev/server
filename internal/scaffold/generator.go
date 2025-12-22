@@ -83,7 +83,8 @@ func generateAttributeScript(dev *types.Device, attr string) string {
 		case "motion":
 			example = `
 -- Frigate motion detection
-if new_value == true and old_value ~= true then
+-- Note: Frigate sends "ON"/"OFF" as strings, not booleans
+if new_value == "ON" and old_value ~= "ON" then
     log.warn("🚨 Motion detected on ` + dev.Name + `!")
     
     -- Turn on lights or trigger other actions
@@ -97,40 +98,20 @@ end`
 		case "detect":
 			example = `
 -- Object detection state changed
-if new_value == true then
+-- Note: Frigate sends "ON"/"OFF" as strings
+if new_value == "ON" then
     log.info("Object detection enabled on ` + dev.Name + `")
-else
+elseif new_value == "OFF" then
     log.info("Object detection disabled on ` + dev.Name + `")
-end
-
--- Note: Actual object detections come through event.data.objects
--- Frigate helper is available globally (no require needed)
--- Check if specific objects were detected:
-if event.data.objects then
-    for _, obj in ipairs(event.data.objects) do
-        log.info(string.format("Detected: %s (confidence: %.1f%%)", obj.label, obj.score * 100))
-        
-        -- React to specific objects
-        if obj.label == "person" then
-            log.warn("👤 Person detected!")
-            -- device.set("entrance_light", {state = "ON"})
-        elseif obj.label == "car" then
-            log.info("🚗 Car detected")
-        end
-    end
-    
-    -- Or use frigate helper functions:
-    -- if frigate.has_object(event.data.objects, "person") then
-    --     log.warn("👤 Person detected!")
-    -- end
 end`
 		case "enabled":
 			example = `
 -- Camera enabled/disabled
-if new_value == false and old_value == true then
+-- Note: Frigate sends "ON"/"OFF" as strings
+if new_value == "OFF" and old_value == "ON" then
     log.error("⚠️  Camera ` + dev.Name + ` was DISABLED!")
     -- Alert or enable backup camera
-elseif new_value == true and old_value == false then
+elseif new_value == "ON" and old_value == "OFF" then
     log.info("✅ Camera ` + dev.Name + ` was ENABLED")
 end`
 		case "recordings":
@@ -141,48 +122,65 @@ if new_value == "ON" and old_value ~= "ON" then
 elseif new_value == "OFF" and old_value == "ON" then
     log.info("⏹️  Recording stopped on ` + dev.Name + `")
 end`
-		case "person", "car", "dog", "cat":
+		case "snapshots":
+			example = `
+-- Snapshot state changed
+if new_value == "ON" and old_value ~= "ON" then
+    log.info("📸 Snapshots enabled on ` + dev.Name + `")
+elseif new_value == "OFF" and old_value == "ON" then
+    log.info("⏹️  Snapshots disabled on ` + dev.Name + `")
+end`
+		case "audio":
+			example = `
+-- Audio detection state changed
+if new_value == "ON" then
+    log.info("🔊 Audio detection enabled on ` + dev.Name + `")
+else
+    log.info("🔇 Audio detection disabled on ` + dev.Name + `")
+end`
+		case "improve_contrast":
+			example = `
+-- Improve contrast setting changed
+if new_value == "ON" then
+    log.info("✨ Contrast improvement enabled on ` + dev.Name + `")
+else
+    log.info("Contrast improvement disabled on ` + dev.Name + `")
+end`
+		case "motion_threshold":
+			example = `
+-- Motion detection threshold changed
+-- Value is a number (0-255)
+local threshold = tonumber(new_value) or 0
+log.info("Motion threshold set to " .. threshold .. " on ` + dev.Name + `")`
+		case "motion_contour_area":
+			example = `
+-- Motion contour area changed
+local area = tonumber(new_value) or 0
+log.info("Motion contour area set to " .. area .. " on ` + dev.Name + `")`
+		case "person", "car", "dog", "cat", "all":
 			emoji := map[string]string{
 				"person": "👤",
 				"car":    "🚗",
 				"dog":    "🐕",
 				"cat":    "🐈",
+				"all":    "🎯",
 			}
 			icon := emoji[attr]
-			if icon == "" {
-				icon = "📸"
-			}
 			example = `
--- Snapshot received when ` + attr + ` was detected
--- event.data contains:
---   object_type: "` + attr + `"
---   snapshot: JPEG image data (byte array)
---   size: size in bytes
---
--- This event is triggered when Frigate detects a ` + attr + ` and takes a snapshot
+-- Object detection count for ` + attr + `
+-- Value is a number (0 = no objects, >0 = objects detected)
+local count = tonumber(new_value) or 0
+local old_count = tonumber(old_value) or 0
 
-if event.data.snapshot then
-    log.warn("` + icon + ` ` + strings.Title(attr) + ` detected on ` + dev.Name + ` (snapshot: " .. event.data.size .. " bytes)")
-    
-    -- Example: Save snapshot to file
-    -- local filename = string.format("/tmp/` + attr + `_%s_%d.jpg", "` + dev.ID + `", os.time())
-    -- local file = io.open(filename, "wb")
-    -- if file then
-    --     file:write(event.data.snapshot)
-    --     file:close()
-    --     log.info("Saved snapshot to: " .. filename)
-    -- end
+if count > 0 and old_count == 0 then
+    log.warn("` + icon + ` ` + strings.Title(attr) + ` detected on ` + dev.Name + ` (count: " .. count .. ")")
     
     -- Example: Turn on lights when person detected
-    -- if event.data.object_type == "person" then
+    -- if "` + attr + `" == "person" then
     --     device.set("entrance_light", {state = "ON"})
-    --     timer.after(300, function()
-    --         device.set("entrance_light", {state = "OFF"})
-    --     end)
     -- end
-    
-    -- Save detection time to state
-    state.set("` + dev.ID + `.last_` + attr + `_detection", os.time())
+elseif count == 0 and old_count > 0 then
+    log.info("` + icon + ` ` + strings.Title(attr) + ` cleared on ` + dev.Name + `")
 end`
 		default:
 			example = `
@@ -280,31 +278,67 @@ func generateActionScript(dev *types.Device, action string) string {
     device.set("` + dev.ID + `", {state = new_state})`
 		description = "Toggle " + dev.ID + " state"
 
-	// Frigate camera actions
+	// Frigate camera actions - use correct command topics per documentation
+	// https://docs.frigate.video/integrations/mqtt/#frigatecamera_namedetectset
 	case "enable":
-		actionCode = `device.set("` + dev.ID + `", {enabled = "ON"})`
-		description = "Enable camera"
+		// Get camera name from device config
+		cameraName := strings.TrimPrefix(dev.ID, "camera_")
+		cameraName = strings.ReplaceAll(cameraName, "_", " ")
+		cameraName = strings.Title(cameraName)
+		actionCode = `-- Publish directly to Frigate MQTT topic
+    local socket = require("socket")
+    local mqtt_host = "` + dev.MQTT.CommandTopic + `"  -- Will be like "frigate/CameraName"
+    -- Use device.set with special Frigate topic structure
+    device.set("` + dev.ID + `", {enabled = "ON"})
+    log.info("Sent enable command to ` + cameraName + `")`
+		description = "Enable camera (sends to frigate/{camera}/enabled/set)"
 	case "disable":
 		actionCode = `device.set("` + dev.ID + `", {enabled = "OFF"})`
-		description = "Disable camera"
-	case "start_detect":
+		description = "Disable camera (sends to frigate/{camera}/enabled/set)"
+	case "detect_on":
 		actionCode = `device.set("` + dev.ID + `", {detect = "ON"})`
-		description = "Start object detection"
-	case "stop_detect":
+		description = "Enable object detection (sends to frigate/{camera}/detect/set)"
+	case "detect_off":
 		actionCode = `device.set("` + dev.ID + `", {detect = "OFF"})`
-		description = "Stop object detection"
-	case "start_recordings":
+		description = "Disable object detection (sends to frigate/{camera}/detect/set)"
+	case "motion_on":
+		actionCode = `device.set("` + dev.ID + `", {motion = "ON"})`
+		description = "Enable motion detection (sends to frigate/{camera}/motion/set)"
+	case "motion_off":
+		actionCode = `device.set("` + dev.ID + `", {motion = "OFF"})`
+		description = "Disable motion detection (sends to frigate/{camera}/motion/set)"
+	case "recordings_on":
 		actionCode = `device.set("` + dev.ID + `", {recordings = "ON"})`
-		description = "Start recordings"
-	case "stop_recordings":
+		description = "Enable recordings (sends to frigate/{camera}/recordings/set)"
+	case "recordings_off":
 		actionCode = `device.set("` + dev.ID + `", {recordings = "OFF"})`
-		description = "Stop recordings"
-	case "start_snapshots":
+		description = "Disable recordings (sends to frigate/{camera}/recordings/set)"
+	case "snapshots_on":
 		actionCode = `device.set("` + dev.ID + `", {snapshots = "ON"})`
-		description = "Start snapshots"
-	case "stop_snapshots":
+		description = "Enable snapshots (sends to frigate/{camera}/snapshots/set)"
+	case "snapshots_off":
 		actionCode = `device.set("` + dev.ID + `", {snapshots = "OFF"})`
-		description = "Stop snapshots"
+		description = "Disable snapshots (sends to frigate/{camera}/snapshots/set)"
+	case "improve_contrast":
+		actionCode = `-- value should be "ON" or "OFF"
+    local value = event.data.value or "ON"
+    device.set("` + dev.ID + `", {improve_contrast = value})`
+		description = "Set improve contrast (sends to frigate/{camera}/improve_contrast/set)"
+	case "ptz_autotracker":
+		actionCode = `-- value should be "ON" or "OFF"
+    local value = event.data.value or "ON"
+    device.set("` + dev.ID + `", {ptz_autotracker = value})`
+		description = "Set PTZ autotracker (sends to frigate/{camera}/ptz_autotracker/set)"
+	case "motion_threshold":
+		actionCode = `-- value should be 0-255
+    local value = event.data.value or 25
+    device.set("` + dev.ID + `", {motion_threshold = value})`
+		description = "Set motion threshold (sends to frigate/{camera}/motion_threshold/set)"
+	case "motion_contour_area":
+		actionCode = `-- value should be integer
+    local value = event.data.value or 10
+    device.set("` + dev.ID + `", {motion_contour_area = value})`
+		description = "Set motion contour area (sends to frigate/{camera}/motion_contour_area/set)"
 
 	// Generic action - user needs to implement
 	default:

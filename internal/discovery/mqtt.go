@@ -264,40 +264,49 @@ func createFrigateCameraDevice(cameraName string) *types.Device {
 		Model:  "Frigate Camera",
 		Vendor: "Frigate NVR",
 		Attributes: []string{
-			"enabled",
-			"detect",
-			"motion",
-			"recordings",
-			"snapshots",
-			"audio",
-			"improve_contrast",
-			"motion_threshold",
-			"motion_contour_area",
-			"birdseye",
-			"birdseye_mode",
-			"review_alerts",
-			"review_detections",
-			// Snapshot events (triggered when objects are detected)
+			// Configuration attributes (from frigate/{camera_name}/{attribute}/state)
+			"enabled",          // Camera enabled state (ON/OFF)
+			"detect",           // Detection enabled (ON/OFF)
+			"motion",           // Motion detection enabled (ON/OFF)
+			"recordings",       // Recordings enabled (ON/OFF)
+			"snapshots",        // Snapshots enabled (ON/OFF)
+			"audio",            // Audio detection enabled (ON/OFF)
+			"improve_contrast", // Improve contrast (ON/OFF)
+			"ptz_autotracker",  // PTZ autotracker (ON/OFF)
+			// Threshold attributes
+			"motion_threshold",    // Motion detection threshold (0-255)
+			"motion_contour_area", // Motion contour area threshold
+			// Object detection counts (from frigate/{camera_name}/{object_type})
 			"person",
 			"car",
 			"dog",
 			"cat",
+			"all", // All detected objects count
 		},
 		Actions: []string{
-			"enable",
-			"disable",
-			"start_detect",
-			"stop_detect",
-			"start_recordings",
-			"stop_recordings",
-			"start_snapshots",
-			"stop_snapshots",
+			// Actions map to frigate/{camera_name}/{action}/set topics
+			"enable",              // frigate/{camera_name}/enabled/set
+			"disable",             // frigate/{camera_name}/enabled/set
+			"detect_on",           // frigate/{camera_name}/detect/set ON
+			"detect_off",          // frigate/{camera_name}/detect/set OFF
+			"motion_on",           // frigate/{camera_name}/motion/set ON
+			"motion_off",          // frigate/{camera_name}/motion/set OFF
+			"recordings_on",       // frigate/{camera_name}/recordings/set ON
+			"recordings_off",      // frigate/{camera_name}/recordings/set OFF
+			"snapshots_on",        // frigate/{camera_name}/snapshots/set ON
+			"snapshots_off",       // frigate/{camera_name}/snapshots/set OFF
+			"improve_contrast",    // frigate/{camera_name}/improve_contrast/set ON/OFF
+			"ptz_autotracker",     // frigate/{camera_name}/ptz_autotracker/set ON/OFF
+			"motion_threshold",    // frigate/{camera_name}/motion_threshold/set <value>
+			"motion_contour_area", // frigate/{camera_name}/motion_contour_area/set <value>
 		},
 		MQTT: types.MQTTConfig{
-			// Use specific state topic pattern instead of wildcard to avoid duplicates
-			// We'll subscribe to individual attribute topics like frigate/Porch/detect/state
-			StateTopic:   fmt.Sprintf("frigate/%s/+/state", cameraName),
-			CommandTopic: fmt.Sprintf("frigate/%s/set", cameraName),
+			// State topic pattern - use wildcard to catch all attribute states
+			// frigate/{camera_name}/detect/state, frigate/{camera_name}/enabled/state, etc.
+			StateTopic: fmt.Sprintf("frigate/%s/+/state", cameraName),
+			// Command topic pattern - NOT USED directly, each action has its own topic
+			// We'll construct specific topics in action scripts
+			CommandTopic: fmt.Sprintf("frigate/%s", cameraName),
 		},
 	}
 }

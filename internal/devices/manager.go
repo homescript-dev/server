@@ -76,7 +76,48 @@ func (m *Manager) Set(id string, attrs map[string]interface{}) error {
 		return fmt.Errorf("MQTT client not connected")
 	}
 
-	// Publish to command topic
+	// Special handling for Frigate cameras - each attribute needs separate topic
+	if dev.Type == "camera" && dev.Vendor == "Frigate NVR" {
+		// Frigate requires publishing to frigate/{camera}/{attribute}/set
+		// CommandTopic is like "frigate/CameraName"
+		for attr, value := range attrs {
+			topic := fmt.Sprintf("%s/%s/set", dev.MQTT.CommandTopic, attr)
+
+			// Convert value to string (Frigate expects "ON"/"OFF" or numeric strings)
+			var payload []byte
+			switch v := value.(type) {
+			case string:
+				payload = []byte(v)
+			case bool:
+				if v {
+					payload = []byte("ON")
+				} else {
+					payload = []byte("OFF")
+				}
+			case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+				payload = []byte(fmt.Sprintf("%d", v))
+			case float32, float64:
+				payload = []byte(fmt.Sprintf("%v", v))
+			default:
+				payload = []byte(fmt.Sprintf("%v", v))
+			}
+
+			logger.Debug("Publishing to Frigate topic %s: %s", topic, string(payload))
+
+			token := m.client.Publish(topic, 0, false, payload)
+			if !token.WaitTimeout(5 * time.Second) {
+				return fmt.Errorf("publish timeout for %s after 5 seconds", attr)
+			}
+			if token.Error() != nil {
+				return fmt.Errorf("failed to publish %s: %w", attr, token.Error())
+			}
+		}
+
+		logger.Debug("Successfully set Frigate camera %s: %v", id, attrs)
+		return nil
+	}
+
+	// Default behavior for non-Frigate devices - publish JSON to single command topic
 	payload, err := json.Marshal(attrs)
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload: %w", err)
