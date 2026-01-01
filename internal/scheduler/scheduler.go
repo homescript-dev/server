@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nathan-osman/go-sunrise"
+	lua "github.com/yuin/gopher-lua"
 )
 
 // Scheduler handles time-based events
@@ -35,7 +36,8 @@ type Scheduler struct {
 type Timer struct {
 	ID          string
 	TriggerTime time.Time
-	Callback    []byte // Lua bytecode
+	Callback    *lua.LFunction
+	State       *lua.LState
 	Recurring   bool
 	Interval    time.Duration
 }
@@ -93,6 +95,15 @@ func (s *Scheduler) Start() {
 func (s *Scheduler) Stop() {
 	close(s.stopChan)
 	s.wg.Wait()
+
+	// Release all timer Lua states
+	s.timersMutex.Lock()
+	for _, timer := range s.timers {
+		s.releaseTimerState(timer)
+	}
+	s.timers = make(map[string]*Timer)
+	s.timersMutex.Unlock()
+
 	logger.Info("Scheduler stopped")
 }
 
@@ -259,7 +270,8 @@ func (s *Scheduler) checkTimers(now time.Time) {
 				timer.TriggerTime = now.Add(timer.Interval)
 				logger.Debug("Timer %s rescheduled for %s", id, timer.TriggerTime.Format("15:04:05"))
 			} else {
-				// Remove one-time timer
+				// Remove one-time timer and release Lua state reference
+				s.releaseTimerState(timer)
 				delete(s.timers, id)
 				logger.Debug("Timer %s removed (one-time)", id)
 			}
@@ -269,10 +281,38 @@ func (s *Scheduler) checkTimers(now time.Time) {
 
 // executeTimerCallback executes a timer callback in a goroutine
 func (s *Scheduler) executeTimerCallback(timer *Timer) {
+	// For non-recurring timers, release state after execution
+	if !timer.Recurring {
+		defer func() {
+			// Decrement timer count in Lua state
+			if timer.State != nil {
+				timerCount := timer.State.GetGlobal("__timer_count__")
+				count := 1 // default if not set
+				if timerCount != lua.LNil {
+					if num, ok := timerCount.(lua.LNumber); ok {
+						count = int(num)
+					}
+				}
+				count--
+
+				if count > 0 {
+					// Still have active timers, just update count
+					timer.State.SetGlobal("__timer_count__", lua.LNumber(count))
+					logger.Debug("Lua state %p has %d remaining timer(s)", timer.State, count)
+				} else {
+					// Last timer completed, release the state
+					timer.State.SetGlobal("__timer_count__", lua.LNumber(0))
+					logger.Debug("Lua state %p last timer completed, releasing state", timer.State)
+					s.releaseTimerState(timer)
+				}
+			}
+		}()
+	}
+
 	if executor, ok := s.executor.(interface {
-		ExecuteCallback(bytecode []byte, timerID string) error
+		ExecuteCallback(callback *lua.LFunction, L *lua.LState, timerID string) error
 	}); ok {
-		if err := executor.ExecuteCallback(timer.Callback, timer.ID); err != nil {
+		if err := executor.ExecuteCallback(timer.Callback, timer.State, timer.ID); err != nil {
 			logger.Error("Timer %s callback failed: %v", timer.ID, err)
 		}
 	} else {
@@ -280,15 +320,29 @@ func (s *Scheduler) executeTimerCallback(timer *Timer) {
 	}
 }
 
+// releaseTimerState releases the Lua state reference for a timer
+func (s *Scheduler) releaseTimerState(timer *Timer) {
+	if timer.State != nil && s.executor != nil {
+		if executor, ok := s.executor.(interface {
+			ReleaseStateReference(L *lua.LState)
+		}); ok {
+			executor.ReleaseStateReference(timer.State)
+		} else {
+			logger.Warn("Executor does not support ReleaseStateReference")
+		}
+	}
+}
+
 // AddTimerCallback adds a new callback-based timer to the scheduler
-func (s *Scheduler) AddTimerCallback(id string, triggerTime time.Time, bytecode []byte) {
+func (s *Scheduler) AddTimerCallback(id string, triggerTime time.Time, callback *lua.LFunction, state *lua.LState) {
 	s.timersMutex.Lock()
 	defer s.timersMutex.Unlock()
 
 	s.timers[id] = &Timer{
 		ID:          id,
 		TriggerTime: triggerTime,
-		Callback:    bytecode,
+		Callback:    callback,
+		State:       state,
 		Recurring:   false,
 	}
 
@@ -296,7 +350,7 @@ func (s *Scheduler) AddTimerCallback(id string, triggerTime time.Time, bytecode 
 }
 
 // AddRecurringTimerCallback adds a recurring callback-based timer
-func (s *Scheduler) AddRecurringTimerCallback(id string, interval time.Duration, bytecode []byte) {
+func (s *Scheduler) AddRecurringTimerCallback(id string, interval time.Duration, callback *lua.LFunction, state *lua.LState) {
 	s.timersMutex.Lock()
 	defer s.timersMutex.Unlock()
 
@@ -305,7 +359,8 @@ func (s *Scheduler) AddRecurringTimerCallback(id string, interval time.Duration,
 	s.timers[id] = &Timer{
 		ID:          id,
 		TriggerTime: triggerTime,
-		Callback:    bytecode,
+		Callback:    callback,
+		State:       state,
 		Recurring:   true,
 		Interval:    interval,
 	}
@@ -318,8 +373,32 @@ func (s *Scheduler) RemoveTimer(id string) bool {
 	s.timersMutex.Lock()
 	defer s.timersMutex.Unlock()
 
-	if _, exists := s.timers[id]; exists {
+	if timer, exists := s.timers[id]; exists {
 		delete(s.timers, id)
+
+		// Decrement timer count in Lua state
+		if timer.State != nil {
+			timerCount := timer.State.GetGlobal("__timer_count__")
+			count := 1 // default if not set
+			if timerCount != lua.LNil {
+				if num, ok := timerCount.(lua.LNumber); ok {
+					count = int(num)
+				}
+			}
+			count--
+
+			if count > 0 {
+				// Still have active timers, just update count
+				timer.State.SetGlobal("__timer_count__", lua.LNumber(count))
+				logger.Debug("Timer %s cancelled, Lua state %p has %d remaining timer(s)", id, timer.State, count)
+			} else {
+				// Last timer removed/cancelled, release the state
+				timer.State.SetGlobal("__timer_count__", lua.LNumber(0))
+				logger.Debug("Timer %s cancelled (last one), releasing Lua state %p", id, timer.State)
+				s.releaseTimerState(timer)
+			}
+		}
+
 		logger.Info("Timer removed: %s", id)
 		return true
 	}

@@ -1,11 +1,11 @@
 .PHONY: all build run discover clean test docker-build docker-up docker-down help
 
 # Variables
-BINARY_NAME=smarthome-server
-DOCKER_IMAGE=smarthome-server:latest
+BINARY_NAME=homescript-server
+DOCKER_IMAGE=homescript-server:latest
 CONFIG_DIR=./config
 DATA_DIR=./data
-MQTT_BROKER=ws://localhost:9001/mqtt
+MQTT_BROKER=tcp://localhost:1883
 
 # Default target
 all: build

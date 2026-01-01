@@ -102,7 +102,7 @@ func runDiscovery(timeout time.Duration) error {
 	// Connect to MQTT for discovery
 	cfg := mqtt.Config{
 		Broker:   mqttBroker,
-		ClientID: "smarthome-discovery",
+		ClientID: "homescript-discovery",
 		Username: mqttUser,
 		Password: mqttPass,
 	}
@@ -173,7 +173,7 @@ func runServer() error {
 	// Connect to MQTT first (without router/deviceManager)
 	cfg := mqtt.Config{
 		Broker:   mqttBroker,
-		ClientID: "homescript-server",
+		ClientID: "homescript-server-" + time.Now().Format("20060102150405"),
 		Username: mqttUser,
 		Password: mqttPass,
 	}

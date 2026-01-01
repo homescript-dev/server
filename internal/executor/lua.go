@@ -7,14 +7,25 @@ import (
 	"homescript-server/internal/storage"
 	"homescript-server/internal/types"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/cjoudrey/gluahttp"
 	"github.com/nubix-io/gluasocket"
 	lua "github.com/yuin/gopher-lua"
 )
+
+// luaStateTracker tracks reference count for Lua states
+type luaStateTracker struct {
+	state      *lua.LState
+	refCount   int
+	mutex      sync.Mutex
+	executeMux sync.Mutex // Protects concurrent execution in the same state
+}
 
 // Executor manages Lua script execution
 type Executor struct {
@@ -23,6 +34,8 @@ type Executor struct {
 	scheduler     interface{} // Scheduler interface to avoid circular dependency
 	scriptTimeout time.Duration
 	configPath    string // Base path for config directory
+	stateTrackers map[*lua.LState]*luaStateTracker
+	trackersMutex sync.RWMutex
 }
 
 // DeviceManager interface for device operations
@@ -39,6 +52,7 @@ func New(store *storage.Storage, dm DeviceManager, configPath string) *Executor 
 		scheduler:     nil,
 		scriptTimeout: 5 * time.Second,
 		configPath:    configPath,
+		stateTrackers: make(map[*lua.LState]*luaStateTracker),
 	}
 }
 
@@ -47,13 +61,91 @@ func (e *Executor) SetScheduler(sched interface{}) {
 	e.scheduler = sched
 }
 
+// addStateReference adds a reference to a Lua state
+func (e *Executor) addStateReference(L *lua.LState) {
+	e.trackersMutex.Lock()
+	defer e.trackersMutex.Unlock()
+
+	tracker, exists := e.stateTrackers[L]
+	if !exists {
+		tracker = &luaStateTracker{
+			state:    L,
+			refCount: 0,
+		}
+		e.stateTrackers[L] = tracker
+	}
+
+	tracker.mutex.Lock()
+	tracker.refCount++
+	tracker.mutex.Unlock()
+
+	logger.Debug("Lua state %p reference count increased to %d", L, tracker.refCount)
+}
+
+// releaseStateReference releases a reference to a Lua state and closes it if no more references
+func (e *Executor) releaseStateReference(L *lua.LState) {
+	e.trackersMutex.Lock()
+	defer e.trackersMutex.Unlock()
+
+	tracker, exists := e.stateTrackers[L]
+	if !exists {
+		logger.Warn("Attempting to release non-tracked Lua state %p", L)
+		return
+	}
+
+	tracker.mutex.Lock()
+	tracker.refCount--
+	count := tracker.refCount
+	tracker.mutex.Unlock()
+
+	logger.Debug("Lua state %p reference count decreased to %d", L, count)
+
+	if count <= 0 {
+		// Check if there are active timers before closing
+		timerCount := L.GetGlobal("__timer_count__")
+		activeTimers := 0
+		if timerCount != lua.LNil {
+			if num, ok := timerCount.(lua.LNumber); ok {
+				activeTimers = int(num)
+			}
+		}
+
+		if activeTimers > 0 {
+			logger.Debug("Lua state %p has %d active timer(s), keeping tracker alive", L, activeTimers)
+			// Don't close or remove from tracking yet - timers still need it
+			return
+		}
+
+		L.Close()
+		delete(e.stateTrackers, L)
+		logger.Debug("Lua state %p closed and removed from tracking", L)
+	}
+}
+
+// ReleaseStateReference is public method for releasing Lua state reference (used by scheduler)
+func (e *Executor) ReleaseStateReference(L *lua.LState) {
+	e.releaseStateReference(L)
+}
+
 // Execute runs a Lua script with the given event
 func (e *Executor) Execute(scriptPath string, event *types.Event) error {
 	ctx, cancel := context.WithTimeout(context.Background(), e.scriptTimeout)
 	defer cancel()
 
 	L := lua.NewState()
-	defer L.Close()
+
+	// Track this state with initial reference count of 1
+	e.addStateReference(L)
+
+	// NOTE: We do NOT defer release here!
+	// If timers are created, they will hold references and release when done.
+	// If no timers created, we need to release manually after script completes.
+	shouldRelease := true
+	defer func() {
+		if shouldRelease {
+			e.releaseStateReference(L)
+		}
+	}()
 
 	// Set timeout context
 	L.SetContext(ctx)
@@ -77,6 +169,7 @@ func (e *Executor) Execute(scriptPath string, event *types.Event) error {
 
 	// Load socket library for network operations (HTTP, TCP, UDP)
 	gluasocket.Preload(L)
+	L.PreloadModule("http", gluahttp.NewHttpModule(&http.Client{}).Loader)
 
 	// Set SCRIPT_DIR global variable (directory of current script)
 	scriptDir := filepath.Dir(scriptPath)
@@ -96,81 +189,61 @@ func (e *Executor) Execute(scriptPath string, event *types.Event) error {
 		return fmt.Errorf("script execution failed: %w", err)
 	}
 
+	// Check if any timers were created during script execution
+	// If timers were created, they now own the reference - don't release here
+	timersCreated := L.GetGlobal("__timers_created__")
+	if timersCreated != lua.LNil && lua.LVAsBool(timersCreated) {
+		shouldRelease = false
+		logger.Debug("Lua state %p has active timers, not releasing from Execute", L)
+	}
+
 	return nil
 }
 
 // ExecuteCallback runs a serialized Lua callback function
-func (e *Executor) ExecuteCallback(bytecode []byte, timerID string) error {
+func (e *Executor) ExecuteCallback(callback *lua.LFunction, L *lua.LState, timerID string) error {
+	// Safety checks
+	if callback == nil {
+		return fmt.Errorf("callback is nil for timer %s", timerID)
+	}
+	if L == nil {
+		return fmt.Errorf("lua state is nil for timer %s", timerID)
+	}
+
+	// Lock the state to prevent concurrent access from multiple timer goroutines
+	e.trackersMutex.RLock()
+	tracker, exists := e.stateTrackers[L]
+	e.trackersMutex.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("lua state %p not tracked for timer %s", L, timerID)
+	}
+
+	// Acquire execution lock for this state
+	tracker.executeMux.Lock()
+	defer tracker.executeMux.Unlock()
+
+	logger.Debug("Timer %s acquired lock on Lua state %p", timerID, L)
+
 	ctx, cancel := context.WithTimeout(context.Background(), e.scriptTimeout)
 	defer cancel()
-
-	L := lua.NewState()
-	defer L.Close()
 
 	// Set timeout context
 	L.SetContext(ctx)
 
-	// Add config/lib to Lua package path
-	libPath := filepath.Join(e.configPath, "lib")
-	configLibPath := fmt.Sprintf("%s/?.lua;%s/?/init.lua", libPath, libPath)
-	if err := L.DoString(fmt.Sprintf(`package.path = package.path .. ";%s"`, configLibPath)); err != nil {
-		logger.Warn("Failed to set Lua package path: %v", err)
-	}
+	err := L.CallByParam(lua.P{
+		Fn:      callback,
+		NRet:    0,
+		Protect: true,
+	})
 
-	// Preload color helpers
-	if err := L.DoString(`color = require("color_helpers")`); err != nil {
-		logger.Warn("Failed to load color helpers: %v", err)
-	}
-
-	// Preload Frigate helpers
-	if err := L.DoString(`frigate = require("frigate_helpers")`); err != nil {
-		logger.Warn("Failed to load Frigate helpers: %v", err)
-	}
-
-	// Load socket library for network operations (HTTP, TCP, UDP)
-	gluasocket.Preload(L)
-
-	// Create a minimal event for timer callback
-	event := &types.Event{
-		Source: "timer",
-		Type:   timerID,
-		Data: map[string]interface{}{
-			"timer_id": timerID,
-		},
-		Timestamp: time.Now(),
-	}
-
-	// Register API functions
-	e.registerAPI(L, event)
-
-	// Load and execute bytecode
-	reader := &bytecodeReader{data: bytecode}
-	fn, err := L.Load(reader, "timer_callback")
 	if err != nil {
-		return fmt.Errorf("failed to load bytecode: %w", err)
+		return fmt.Errorf("timer %s callback error: %w", timerID, err)
 	}
 
-	L.Push(fn)
-	if err := L.PCall(0, 0, nil); err != nil {
-		return fmt.Errorf("callback execution failed: %w", err)
-	}
+	logger.Debug("Timer %s released lock on Lua state %p", timerID, L)
 
 	return nil
-}
-
-// bytecodeReader implements io.Reader for reading bytecode
-type bytecodeReader struct {
-	data []byte
-	pos  int
-}
-
-func (r *bytecodeReader) Read(p []byte) (n int, err error) {
-	if r.pos >= len(r.data) {
-		return 0, fmt.Errorf("EOF")
-	}
-	n = copy(p, r.data[r.pos:])
-	r.pos += n
-	return n, nil
 }
 
 func (e *Executor) registerAPI(L *lua.LState, event *types.Event) {
@@ -568,37 +641,6 @@ func (e *Executor) fromLuaValue(value lua.LValue) interface{} {
 	}
 }
 
-// Helper functions
-
-// dumpFunction dumps a Lua function to bytecode using string.dump
-func dumpFunction(L *lua.LState, fn *lua.LFunction) ([]byte, error) {
-	// Push string.dump function
-	L.GetGlobal("string")
-	stringTable := L.Get(-1)
-	L.Pop(1)
-
-	if tbl, ok := stringTable.(*lua.LTable); ok {
-		dump := L.GetField(tbl, "dump")
-		if dumpFn, ok := dump.(*lua.LFunction); ok {
-			// Call string.dump(fn)
-			L.Push(dumpFn)
-			L.Push(fn)
-			if err := L.PCall(1, 1, nil); err != nil {
-				return nil, err
-			}
-
-			result := L.Get(-1)
-			L.Pop(1)
-
-			if str, ok := result.(lua.LString); ok {
-				return []byte(string(str)), nil
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("failed to dump function")
-}
-
 // Timer functions
 
 // timerAfter schedules a timer to run after specified duration
@@ -626,22 +668,29 @@ func (e *Executor) timerAfter(L *lua.LState) int {
 		timerID = fmt.Sprintf("timer_%d", time.Now().UnixNano())
 	}
 
-	// Dump callback function to bytecode
-	bytecode, err := dumpFunction(L, callback)
-	if err != nil {
-		logger.Error("[LUA] Failed to dump callback: %v", err)
-		L.Push(lua.LNil)
-		return 1
-	}
-
 	// Type assertion to get scheduler methods
 	type schedulerInterface interface {
-		AddTimerCallback(id string, triggerTime time.Time, callback []byte)
+		AddTimerCallback(id string, triggerTime time.Time, callback *lua.LFunction, state *lua.LState)
 	}
 
 	if sched, ok := e.scheduler.(schedulerInterface); ok {
 		triggerTime := time.Now().Add(time.Duration(seconds) * time.Second)
-		sched.AddTimerCallback(timerID, triggerTime, bytecode)
+
+		// Increment timer counter for this state
+		timerCount := L.GetGlobal("__timer_count__")
+		count := 0
+		if timerCount != lua.LNil {
+			if num, ok := timerCount.(lua.LNumber); ok {
+				count = int(num)
+			}
+		}
+		count++
+		L.SetGlobal("__timer_count__", lua.LNumber(count))
+		L.SetGlobal("__timers_created__", lua.LTrue)
+
+		logger.Debug("Lua state %p now has %d active timer(s)", L, count)
+
+		sched.AddTimerCallback(timerID, triggerTime, callback, L)
 		L.Push(lua.LString(timerID))
 	} else {
 		logger.Error("[LUA] Scheduler type assertion failed")
@@ -692,20 +741,26 @@ func (e *Executor) timerAt(L *lua.LState) int {
 		triggerTime = triggerTime.Add(24 * time.Hour)
 	}
 
-	// Dump callback function to bytecode
-	bytecode, err := dumpFunction(L, callback)
-	if err != nil {
-		logger.Error("[LUA] Failed to dump callback: %v", err)
-		L.Push(lua.LNil)
-		return 1
-	}
-
 	type schedulerInterface interface {
-		AddTimerCallback(id string, triggerTime time.Time, callback []byte)
+		AddTimerCallback(id string, triggerTime time.Time, callback *lua.LFunction, state *lua.LState)
 	}
 
 	if sched, ok := e.scheduler.(schedulerInterface); ok {
-		sched.AddTimerCallback(timerID, triggerTime, bytecode)
+		// Increment timer counter
+		timerCount := L.GetGlobal("__timer_count__")
+		count := 0
+		if timerCount != lua.LNil {
+			if num, ok := timerCount.(lua.LNumber); ok {
+				count = int(num)
+			}
+		}
+		count++
+		L.SetGlobal("__timer_count__", lua.LNumber(count))
+		L.SetGlobal("__timers_created__", lua.LTrue)
+
+		logger.Debug("Lua state %p now has %d active timer(s)", L, count)
+
+		sched.AddTimerCallback(timerID, triggerTime, callback, L)
 		L.Push(lua.LString(timerID))
 	} else {
 		logger.Error("[LUA] Scheduler type assertion failed")
@@ -740,21 +795,28 @@ func (e *Executor) timerEvery(L *lua.LState) int {
 		timerID = fmt.Sprintf("timer_%d", time.Now().UnixNano())
 	}
 
-	// Dump callback function to bytecode
-	bytecode, err := dumpFunction(L, callback)
-	if err != nil {
-		logger.Error("[LUA] Failed to dump callback: %v", err)
-		L.Push(lua.LNil)
-		return 1
-	}
-
 	type schedulerInterface interface {
-		AddRecurringTimerCallback(id string, interval time.Duration, callback []byte)
+		AddRecurringTimerCallback(id string, interval time.Duration, callback *lua.LFunction, state *lua.LState)
 	}
 
 	if sched, ok := e.scheduler.(schedulerInterface); ok {
 		interval := time.Duration(seconds) * time.Second
-		sched.AddRecurringTimerCallback(timerID, interval, bytecode)
+
+		// Increment timer counter
+		timerCount := L.GetGlobal("__timer_count__")
+		count := 0
+		if timerCount != lua.LNil {
+			if num, ok := timerCount.(lua.LNumber); ok {
+				count = int(num)
+			}
+		}
+		count++
+		L.SetGlobal("__timer_count__", lua.LNumber(count))
+		L.SetGlobal("__timers_created__", lua.LTrue)
+
+		logger.Debug("Lua state %p now has %d active timer(s)", L, count)
+
+		sched.AddRecurringTimerCallback(timerID, interval, callback, L)
 		L.Push(lua.LString(timerID))
 	} else {
 		logger.Error("[LUA] Scheduler type assertion failed")

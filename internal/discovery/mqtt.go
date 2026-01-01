@@ -301,11 +301,10 @@ func createFrigateCameraDevice(cameraName string) *types.Device {
 			"motion_contour_area", // frigate/{camera_name}/motion_contour_area/set <value>
 		},
 		MQTT: types.MQTTConfig{
-			// State topic pattern - use wildcard to catch all attribute states
+			// State topic pattern for configuration states
 			// frigate/{camera_name}/detect/state, frigate/{camera_name}/enabled/state, etc.
-			StateTopic: fmt.Sprintf("frigate/%s/+/state", cameraName),
-			// Command topic pattern - NOT USED directly, each action has its own topic
-			// We'll construct specific topics in action scripts
+			StateTopic: fmt.Sprintf("frigate/%s/#", cameraName),
+			// Command topic base - each action constructs its own topic
 			CommandTopic: fmt.Sprintf("frigate/%s", cameraName),
 		},
 	}

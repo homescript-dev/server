@@ -232,19 +232,6 @@ end`
 -- end`
 	}
 
-	// Special template for snapshot events (person, car, dog, cat)
-	isSnapshot := dev.Type == "camera" && dev.Vendor == "Frigate NVR" &&
-		(attr == "person" || attr == "car" || attr == "dog" || attr == "cat")
-
-	if isSnapshot {
-		return fmt.Sprintf(`-- Device: %s (%s %s)
--- Snapshot Event: %s
--- Triggered when %s is detected and snapshot is captured
-
-%s
-`, dev.Name, dev.Vendor, dev.Model, attr, attr, example)
-	}
-
 	// Normal attribute change event template
 	return fmt.Sprintf(`-- Device: %s (%s %s)
 -- Attribute: %s
@@ -253,12 +240,10 @@ end`
 local new_value = event.data.%s
 local old_value = state.get("device.%s.%s")
 
-log.info(string.format("%s.%s changed from %%s to %%s", tostring(old_value), tostring(new_value)))
-
 -- Save new value to state
 state.set("device.%s.%s", new_value)
 %s
-`, dev.Name, dev.Vendor, dev.Model, attr, attr, attr, dev.ID, attr, dev.ID, attr, dev.ID, attr, example)
+`, dev.Name, dev.Vendor, dev.Model, attr, attr, attr, dev.ID, attr, dev.ID, attr, example)
 }
 
 func generateActionScript(dev *types.Device, action string) string {
@@ -281,16 +266,7 @@ func generateActionScript(dev *types.Device, action string) string {
 	// Frigate camera actions - use correct command topics per documentation
 	// https://docs.frigate.video/integrations/mqtt/#frigatecamera_namedetectset
 	case "enable":
-		// Get camera name from device config
-		cameraName := strings.TrimPrefix(dev.ID, "camera_")
-		cameraName = strings.ReplaceAll(cameraName, "_", " ")
-		cameraName = strings.Title(cameraName)
-		actionCode = `-- Publish directly to Frigate MQTT topic
-    local socket = require("socket")
-    local mqtt_host = "` + dev.MQTT.CommandTopic + `"  -- Will be like "frigate/CameraName"
-    -- Use device.set with special Frigate topic structure
-    device.set("` + dev.ID + `", {enabled = "ON"})
-    log.info("Sent enable command to ` + cameraName + `")`
+		actionCode = `device.set("` + dev.ID + `", {enabled = "ON"})`
 		description = "Enable camera (sends to frigate/{camera}/enabled/set)"
 	case "disable":
 		actionCode = `device.set("` + dev.ID + `", {enabled = "OFF"})`

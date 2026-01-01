@@ -106,18 +106,6 @@ func (c *Client) SubscribeToDevices() error {
 		}
 
 		logger.Debug("Subscribed to device: %s (%s)", dev.ID, topic)
-
-		// For Frigate cameras, also subscribe to snapshots
-		if dev.Type == "camera" && dev.Vendor == "Frigate NVR" {
-			// Subscribe to frigate/CameraName/+/snapshot for all object types
-			snapshotTopic := strings.Replace(dev.MQTT.StateTopic, "/+/state", "/+/snapshot", 1)
-			token = c.client.Subscribe(snapshotTopic, 0, c.makeDeviceHandler(dev))
-			if token.Wait() && token.Error() != nil {
-				logger.Warn("Failed to subscribe to snapshots %s: %v", snapshotTopic, token.Error())
-			} else {
-				logger.Debug("Subscribed to snapshots: %s (%s)", dev.ID, snapshotTopic)
-			}
-		}
 	}
 
 	return nil
