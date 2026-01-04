@@ -99,6 +99,74 @@ type FrigateCameraConfig struct {
 	Detections             bool `json:"detections"`
 }
 
+// HomeAssistantDiscovery represents Home Assistant MQTT Discovery config
+// https://www.home-assistant.io/integrations/mqtt#mqtt-discovery
+type HomeAssistantDiscovery struct {
+	Name              string               `json:"name"`
+	UniqueID          string               `json:"unique_id"`
+	StateTopic        string               `json:"state_topic"`
+	CommandTopic      string               `json:"command_topic,omitempty"`
+	AvailabilityTopic string               `json:"availability_topic,omitempty"`
+	DeviceClass       string               `json:"device_class,omitempty"`
+	UnitOfMeasurement string               `json:"unit_of_measurement,omitempty"`
+	ValueTemplate     string               `json:"value_template,omitempty"`
+	Device            *HomeAssistantDevice `json:"device,omitempty"`
+	PayloadOn         string               `json:"payload_on,omitempty"`
+	PayloadOff        string               `json:"payload_off,omitempty"`
+	StateOn           string               `json:"state_on,omitempty"`
+	StateOff          string               `json:"state_off,omitempty"`
+	Icon              string               `json:"icon,omitempty"`
+	EntityCategory    string               `json:"entity_category,omitempty"`
+
+	// Climate-specific topics (https://www.home-assistant.io/integrations/climate.mqtt/)
+	CurrentTemperatureTopic string `json:"current_temperature_topic,omitempty"`
+	TemperatureStateTopic   string `json:"temperature_state_topic,omitempty"`
+	TemperatureCommandTopic string `json:"temperature_command_topic,omitempty"`
+	ModeStateTopic          string `json:"mode_state_topic,omitempty"`
+	ModeCommandTopic        string `json:"mode_command_topic,omitempty"`
+	FanModeStateTopic       string `json:"fan_mode_state_topic,omitempty"`
+	FanModeCommandTopic     string `json:"fan_mode_command_topic,omitempty"`
+	ActionTopic             string `json:"action_topic,omitempty"`
+
+	// Cover-specific topics
+	PositionTopic    string `json:"position_topic,omitempty"`
+	SetPositionTopic string `json:"set_position_topic,omitempty"`
+	TiltStatusTopic  string `json:"tilt_status_topic,omitempty"`
+	TiltCommandTopic string `json:"tilt_command_topic,omitempty"`
+
+	// Light-specific topics
+	BrightnessStateTopic   string `json:"brightness_state_topic,omitempty"`
+	BrightnessCommandTopic string `json:"brightness_command_topic,omitempty"`
+	ColorModeStateTopic    string `json:"color_mode_state_topic,omitempty"`
+	RGBStateTopic          string `json:"rgb_state_topic,omitempty"`
+	RGBCommandTopic        string `json:"rgb_command_topic,omitempty"`
+
+	// Fan-specific topics
+	PercentageStateTopic    string `json:"percentage_state_topic,omitempty"`
+	PercentageCommandTopic  string `json:"percentage_command_topic,omitempty"`
+	PresetModeStateTopic    string `json:"preset_mode_state_topic,omitempty"`
+	PresetModeCommandTopic  string `json:"preset_mode_command_topic,omitempty"`
+	OscillationStateTopic   string `json:"oscillation_state_topic,omitempty"`
+	OscillationCommandTopic string `json:"oscillation_command_topic,omitempty"`
+
+	// Humidifier-specific topics
+	TargetHumidityStateTopic   string `json:"target_humidity_state_topic,omitempty"`
+	TargetHumidityCommandTopic string `json:"target_humidity_command_topic,omitempty"`
+	CurrentHumidityTopic       string `json:"current_humidity_topic,omitempty"`
+
+	// Additional fields that may be present
+	Extra map[string]interface{} `json:"-"`
+}
+
+// HomeAssistantDevice represents device info in HA discovery
+type HomeAssistantDevice struct {
+	Identifiers  []string `json:"identifiers"`
+	Name         string   `json:"name"`
+	Model        string   `json:"model,omitempty"`
+	Manufacturer string   `json:"manufacturer,omitempty"`
+	SWVersion    string   `json:"sw_version,omitempty"`
+}
+
 // FrigateCameraStats represents stats for a single camera
 type FrigateCameraStats struct {
 	CameraFPS    float64 `json:"camera_fps"`

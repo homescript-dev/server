@@ -20,6 +20,7 @@ type Client struct {
 	client        mqtt.Client
 	router        *events.Router
 	deviceManager *devices.Manager
+	brokerURL     string
 }
 
 // Config holds MQTT connection configuration
@@ -37,13 +38,19 @@ func NewClient(cfg Config, router *events.Router, dm *devices.Manager) (*Client,
 	mqtt.CRITICAL = log.New(io.Discard, "", 0)
 	mqtt.WARN = log.New(io.Discard, "", 0)
 
-	opts := mqtt.NewClientOptions()
-
 	// Ensure broker URL has tcp:// prefix
 	brokerURL := cfg.Broker
 	if !strings.HasPrefix(brokerURL, "tcp://") && !strings.HasPrefix(brokerURL, "ssl://") {
 		brokerURL = "tcp://" + brokerURL
 	}
+
+	mqttClient := &Client{
+		router:        router,
+		deviceManager: dm,
+		brokerURL:     brokerURL,
+	}
+
+	opts := mqtt.NewClientOptions()
 
 	logger.Debug("Connecting to MQTT broker at %s...", brokerURL)
 	opts.AddBroker(brokerURL)
@@ -60,16 +67,36 @@ func NewClient(cfg Config, router *events.Router, dm *devices.Manager) (*Client,
 	opts.SetWriteTimeout(10 * time.Second)
 	opts.SetPingTimeout(10 * time.Second)
 	opts.SetKeepAlive(60 * time.Second)
+	opts.SetCleanSession(false) // Persist session to keep subscriptions
 
 	opts.OnConnect = func(c mqtt.Client) {
-		logger.Debug("MQTT connected to %s", brokerURL)
+		logger.Info("MQTT connected")
+
+		// Resubscribe to all devices after reconnection
+		if mqttClient.deviceManager != nil {
+			go func() {
+				time.Sleep(100 * time.Millisecond) // Small delay to ensure connection is stable
+				if err := mqttClient.SubscribeToDevices(); err != nil {
+					logger.Error("Failed to resubscribe after reconnect: %v", err)
+				} else {
+					logger.Info("Resubscribed to all devices after reconnection")
+				}
+			}()
+		}
 	}
 
 	opts.OnConnectionLost = func(c mqtt.Client, err error) {
 		logger.Error("MQTT connection lost: %v", err)
+		logger.Info("Auto-reconnect is enabled, will attempt to reconnect...")
+	}
+
+	opts.OnReconnecting = func(c mqtt.Client, opts *mqtt.ClientOptions) {
+		logger.Info("Reconnecting to MQTT broker...")
 	}
 
 	client := mqtt.NewClient(opts)
+	mqttClient.client = client
+
 	token := client.Connect()
 
 	// Wait for connection with timeout
@@ -83,12 +110,6 @@ func NewClient(cfg Config, router *events.Router, dm *devices.Manager) (*Client,
 
 	logger.Debug("MQTT connection established successfully")
 
-	mqttClient := &Client{
-		client:        client,
-		router:        router,
-		deviceManager: dm,
-	}
-
 	return mqttClient, nil
 }
 
@@ -98,6 +119,12 @@ func (c *Client) SubscribeToDevices() error {
 
 	for _, dev := range devices {
 		topic := dev.MQTT.StateTopic
+
+		// Skip devices without state_topic (some HA devices may not have it)
+		if topic == "" {
+			logger.Debug("Skipping device %s: no state_topic configured", dev.ID)
+			continue
+		}
 
 		token := c.client.Subscribe(topic, 0, c.makeDeviceHandler(dev))
 		if token.Wait() && token.Error() != nil {
@@ -311,6 +338,14 @@ func (c *Client) handleFrigateSnapshot(dev *types.Device, topic string, payload 
 
 // Disconnect closes the MQTT connection
 func (c *Client) Disconnect() {
+	// Publish offline status before disconnecting (clean shutdown)
+	token := c.client.Publish("homeassistant/status", 1, true, "offline")
+	if token.WaitTimeout(1 * time.Second) {
+		if token.Error() != nil {
+			logger.Debug("Failed to publish offline status: %v", token.Error())
+		}
+	}
+
 	c.client.Disconnect(250)
 	logger.Debug("MQTT disconnected")
 }

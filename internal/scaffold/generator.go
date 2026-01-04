@@ -35,8 +35,18 @@ func GenerateScaffolds(devices []*types.Device, basePath string) error {
 func generateDeviceScaffold(dev *types.Device, basePath string) error {
 	devicePath := filepath.Join(basePath, "events", "device", dev.ID)
 
+	// For Home Assistant devices, use standard attributes for scaffold
+	// since HA doesn't provide attribute list in discovery config
+	attributes := dev.Attributes
+	if strings.HasPrefix(dev.ID, "ha/") && len(attributes) == 0 {
+		standardAttrs := getStandardHAAttributes(dev.Type)
+		if len(standardAttrs) > 0 {
+			attributes = standardAttrs
+		}
+	}
+
 	// Generate attribute change handlers
-	for _, attr := range dev.Attributes {
+	for _, attr := range attributes {
 		attrPath := filepath.Join(devicePath, attr)
 		if err := os.MkdirAll(attrPath, 0755); err != nil {
 			return err
@@ -53,13 +63,22 @@ func generateDeviceScaffold(dev *types.Device, basePath string) error {
 	}
 
 	// Generate action handlers
-	if len(dev.Actions) > 0 {
+	// For HA devices, use standard actions even if device.Actions is empty
+	actions := dev.Actions
+	if strings.HasPrefix(dev.ID, "ha/") && len(actions) == 0 {
+		standardActions := getStandardHAActions(dev.Type)
+		if len(standardActions) > 0 {
+			actions = standardActions
+		}
+	}
+
+	if len(actions) > 0 {
 		actionsPath := filepath.Join(devicePath, "actions")
 		if err := os.MkdirAll(actionsPath, 0755); err != nil {
 			return err
 		}
 
-		for _, action := range dev.Actions {
+		for _, action := range actions {
 			scriptPath := filepath.Join(actionsPath, action+".lua")
 			if !fileExists(scriptPath) {
 				template := generateActionScript(dev, action)
@@ -77,8 +96,40 @@ func generateDeviceScaffold(dev *types.Device, basePath string) error {
 func generateAttributeScript(dev *types.Device, attr string) string {
 	example := ""
 
-	// Special handling for Frigate cameras
-	if dev.Type == "camera" && dev.Vendor == "Frigate NVR" {
+	// Special handling for Home Assistant devices (identified by ha/ prefix)
+	if strings.HasPrefix(dev.ID, "ha/") {
+		switch dev.Type {
+		case "climate":
+			example = generateClimateExample(dev, attr)
+		case "humidifier":
+			example = generateHumidifierExample(dev, attr)
+		case "vacuum":
+			example = generateVacuumExample(dev, attr)
+		case "alarm":
+			example = generateAlarmExample(dev, attr)
+		case "cover":
+			example = generateCoverExample(dev, attr)
+		case "valve":
+			example = generateValveExample(dev, attr)
+		case "fan":
+			example = generateFanExample(dev, attr)
+		case "lock":
+			example = generateLockExample(dev, attr)
+		case "water_heater":
+			example = generateWaterHeaterExample(dev, attr)
+		case "lawn_mower":
+			example = generateLawnMowerExample(dev, attr)
+		case "siren":
+			example = generateSirenExample(dev, attr)
+		case "number", "select", "text":
+			example = generateInputExample(dev, attr)
+		case "sensor":
+			example = generateSensorExample(dev, attr)
+		case "binary_sensor":
+			example = generateBinarySensorExample(dev, attr)
+		}
+	} else if dev.Type == "camera" && dev.Vendor == "Frigate NVR" {
+		// Special handling for Frigate cameras
 		switch attr {
 		case "motion":
 			example = `
@@ -232,7 +283,19 @@ end`
 -- end`
 	}
 
-	// Normal attribute change event template
+	// Template for Home Assistant devices (different structure)
+	if strings.HasPrefix(dev.ID, "ha/") {
+		return fmt.Sprintf(`-- Device: %s (%s %s)
+-- Type: %s
+-- Triggered when device state changes via MQTT
+
+-- Home Assistant sends complete JSON state in event.data
+-- No need to track individual attributes - work with full state
+%s
+`, dev.Name, dev.Vendor, dev.Model, dev.Type, example)
+	}
+
+	// Normal attribute change event template (for Zigbee, etc)
 	return fmt.Sprintf(`-- Device: %s (%s %s)
 -- Attribute: %s
 -- Triggered when %s changes
@@ -262,6 +325,144 @@ func generateActionScript(dev *types.Device, action string) string {
     local new_state = (current.state == "ON") and "OFF" or "ON"
     device.set("` + dev.ID + `", {state = new_state})`
 		description = "Toggle " + dev.ID + " state"
+
+	// Home Assistant climate actions
+	case "set_temperature":
+		actionCode = `-- Temperature in Celsius
+    local temp = event.data.temperature or 22
+    device.set("` + dev.ID + `", {temperature = temp})
+    log.info("Set temperature to " .. temp .. "°C")`
+		description = "Set target temperature"
+	case "set_hvac_mode":
+		actionCode = `-- Modes: "off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only"
+    local mode = event.data.mode or "heat"
+    device.set("` + dev.ID + `", {hvac_mode = mode})
+    log.info("Set HVAC mode to " .. mode)`
+		description = "Set HVAC mode (heat/cool/off/auto)"
+	case "set_fan_mode":
+		actionCode = `-- Fan modes: "auto", "low", "medium", "high", etc.
+    local fan_mode = event.data.fan_mode or "auto"
+    device.set("` + dev.ID + `", {fan_mode = fan_mode})
+    log.info("Set fan mode to " .. fan_mode)`
+		description = "Set fan mode"
+	case "set_preset_mode":
+		actionCode = `-- Presets: "eco", "comfort", "away", "sleep", etc.
+    local preset = event.data.preset or "comfort"
+    device.set("` + dev.ID + `", {preset_mode = preset})
+    log.info("Set preset to " .. preset)`
+		description = "Set preset mode"
+
+	// HA light actions
+	case "set_brightness":
+		actionCode = `-- Brightness: 0-255
+    local brightness = event.data.brightness or 128
+    device.set("` + dev.ID + `", {brightness = brightness})
+    log.info("Set brightness to " .. brightness)`
+		description = "Set brightness"
+	case "set_color":
+		actionCode = `-- RGB color: {r=255, g=0, b=0} or {h=120, s=100}
+    local color = event.data.color or {r=255, g=255, b=255}
+    device.set("` + dev.ID + `", {rgb_color = color})
+    log.info("Set color")`
+		description = "Set color"
+
+	// HA cover/valve actions
+	case "open":
+		actionCode = `device.set("` + dev.ID + `", {command = "open"})
+    log.info("Opening ` + dev.Name + `")`
+		description = "Open cover/valve"
+	case "close":
+		actionCode = `device.set("` + dev.ID + `", {command = "close"})
+    log.info("Closing ` + dev.Name + `")`
+		description = "Close cover/valve"
+	case "stop":
+		actionCode = `device.set("` + dev.ID + `", {command = "stop"})
+    log.info("Stopping ` + dev.Name + `")`
+		description = "Stop cover/valve"
+	case "set_position":
+		actionCode = `-- Position: 0-100 (0=closed, 100=open)
+    local position = event.data.position or 50
+    device.set("` + dev.ID + `", {position = position})
+    log.info("Set position to " .. position .. "%")`
+		description = "Set position"
+
+	// HA lock actions
+	case "lock":
+		actionCode = `device.set("` + dev.ID + `", {command = "lock"})
+    log.info("Locking ` + dev.Name + `")`
+		description = "Lock"
+	case "unlock":
+		actionCode = `device.set("` + dev.ID + `", {command = "unlock"})
+    log.info("Unlocking ` + dev.Name + `")`
+		description = "Unlock"
+
+	// HA vacuum actions
+	case "start":
+		actionCode = `device.set("` + dev.ID + `", {command = "start"})
+    log.info("Starting vacuum")`
+		description = "Start vacuum"
+	case "pause":
+		actionCode = `device.set("` + dev.ID + `", {command = "pause"})
+    log.info("Pausing")`
+		description = "Pause"
+	case "return_to_base":
+		actionCode = `device.set("` + dev.ID + `", {command = "return_to_base"})
+    log.info("Returning to base")`
+		description = "Return to base"
+
+	// HA alarm actions
+	case "arm_away":
+		actionCode = `device.set("` + dev.ID + `", {command = "arm_away"})
+    log.info("Arming away")`
+		description = "Arm away"
+	case "arm_home":
+		actionCode = `device.set("` + dev.ID + `", {command = "arm_home"})
+    log.info("Arming home")`
+		description = "Arm home"
+	case "disarm":
+		actionCode = `-- May require code
+    device.set("` + dev.ID + `", {command = "disarm"})
+    log.info("Disarming")`
+		description = "Disarm"
+
+	// HA input actions
+	case "set_value":
+		actionCode = `local value = event.data.value or 0
+    device.set("` + dev.ID + `", {value = value})
+    log.info("Set value to " .. tostring(value))`
+		description = "Set value"
+	case "select_option":
+		actionCode = `local option = event.data.option or "default"
+    device.set("` + dev.ID + `", {option = option})
+    log.info("Selected option: " .. option)`
+		description = "Select option"
+
+	// HA other actions
+	case "set_humidity":
+		actionCode = `-- Humidity: 0-100%
+    local humidity = event.data.humidity or 60
+    device.set("` + dev.ID + `", {humidity = humidity})
+    log.info("Set humidity to " .. humidity .. "%")`
+		description = "Set humidity"
+	case "set_percentage":
+		actionCode = `-- Percentage: 0-100
+    local percentage = event.data.percentage or 50
+    device.set("` + dev.ID + `", {percentage = percentage})
+    log.info("Set percentage to " .. percentage .. "%")`
+		description = "Set percentage"
+	case "set_mode":
+		actionCode = `local mode = event.data.mode or "auto"
+    device.set("` + dev.ID + `", {mode = mode})
+    log.info("Set mode to " .. mode)`
+		description = "Set mode"
+	case "start_mowing":
+		actionCode = `device.set("` + dev.ID + `", {command = "start_mowing"})
+    log.info("Starting lawn mower")`
+		description = "Start mowing"
+	case "dock":
+		actionCode = `device.set("` + dev.ID + `", {command = "dock"})
+    log.info("Returning to dock")`
+		description = "Return to dock"
 
 	// Frigate camera actions - use correct command topics per documentation
 	// https://docs.frigate.video/integrations/mqtt/#frigatecamera_namedetectset

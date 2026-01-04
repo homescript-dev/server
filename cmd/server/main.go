@@ -117,8 +117,12 @@ func runDiscovery(timeout time.Duration) error {
 	logger.Debug("Waiting for MQTT connection to stabilize...")
 	time.Sleep(2 * time.Second)
 
+	// Create temporary device manager for HA config registration
+	tempDeviceManager := devices.New(mqttClient.GetInternalClient(), nil)
+
 	// Run discovery
 	disc := discovery.New(mqttClient.GetInternalClient())
+	disc.SetHAManager(tempDeviceManager.GetHAManager())
 	discoveredDevices := disc.Discover(timeout)
 
 	if len(discoveredDevices) == 0 {
@@ -134,6 +138,16 @@ func runDiscovery(timeout time.Duration) error {
 		return err
 	}
 	logger.Info("Generated: %s", devicesYAMLPath)
+
+	// Save HA discovery configs
+	haConfigsPath := configPath + "/devices/ha_configs.json"
+	haConfigs := disc.GetHAConfigs()
+	if len(haConfigs) > 0 {
+		if err := config.SaveHAConfigs(haConfigs, haConfigsPath); err != nil {
+			return err
+		}
+		logger.Info("Saved %d HA device config(s) to: %s", len(haConfigs), haConfigsPath)
+	}
 
 	// Generate script scaffolds
 	if err := scaffold.GenerateScaffolds(discoveredDevices, configPath); err != nil {
@@ -188,6 +202,19 @@ func runServer() error {
 
 	// Initialize device manager with MQTT client
 	deviceManager := devices.New(mqttClient.GetInternalClient(), deviceConfig.Devices)
+
+	// Load and register HA discovery configs
+	haConfigsPath := configPath + "/devices/ha_configs.json"
+	haConfigs, err := config.LoadHAConfigs(haConfigsPath)
+	if err != nil {
+		logger.Warn("Failed to load HA configs: %v", err)
+	} else if len(haConfigs) > 0 {
+		haManager := deviceManager.GetHAManager()
+		for deviceID, haConfig := range haConfigs {
+			haManager.RegisterDevice(deviceID, haConfig)
+		}
+		logger.Info("Loaded %d HA device config(s)", len(haConfigs))
+	}
 
 	// Initialize executor with device manager and storage
 	exec := executor.New(store, deviceManager, configPath)

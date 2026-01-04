@@ -13,18 +13,20 @@ import (
 
 // Manager manages smart home devices
 type Manager struct {
-	client  mqtt.Client
-	devices map[string]*types.Device
-	states  map[string]map[string]interface{}
-	mu      sync.RWMutex
+	client    mqtt.Client
+	devices   map[string]*types.Device
+	states    map[string]map[string]interface{}
+	haManager *HADeviceManager
+	mu        sync.RWMutex
 }
 
 // New creates a new device manager
 func New(client mqtt.Client, devices []*types.Device) *Manager {
 	m := &Manager{
-		client:  client,
-		devices: make(map[string]*types.Device),
-		states:  make(map[string]map[string]interface{}),
+		client:    client,
+		devices:   make(map[string]*types.Device),
+		states:    make(map[string]map[string]interface{}),
+		haManager: NewHADeviceManager(client),
 	}
 
 	for _, dev := range devices {
@@ -40,6 +42,12 @@ func (m *Manager) SetClient(client mqtt.Client) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.client = client
+	m.haManager.SetClient(client)
+}
+
+// GetHAManager returns the HA device manager
+func (m *Manager) GetHAManager() *HADeviceManager {
+	return m.haManager
 }
 
 // Get retrieves current state of a device
@@ -74,6 +82,11 @@ func (m *Manager) Set(id string, attrs map[string]interface{}) error {
 	if !m.client.IsConnected() {
 		logger.Warn("MQTT client not connected when trying to set device %s", id)
 		return fmt.Errorf("MQTT client not connected")
+	}
+
+	// Delegate to HADeviceManager if this is an HA device
+	if m.haManager.IsHADevice(id) {
+		return m.haManager.Set(id, attrs)
 	}
 
 	// Special handling for Frigate cameras - each attribute needs separate topic

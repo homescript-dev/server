@@ -52,6 +52,53 @@ Start the automation server:
 
 **Sunrise/Sunset**: Location is automatically detected from your public IP. Override with `--latitude` and `--longitude` for precise coordinates.
 
+## Integrations
+
+### Zigbee2MQTT
+
+Automatically discovers all Zigbee devices:
+- Lights (IKEA, Philips Hue, etc.)
+- Switches and relays (Sonoff, Aqara, etc.)
+- Sensors (temperature, humidity, motion, etc.)
+- Buttons and remotes
+
+### Frigate NVR
+
+Discovers and monitors security cameras:
+- Motion detection events
+- Object detection (person, car, dog, cat, etc.)
+- Camera control (enable/disable, recordings, snapshots)
+- Zone-based detection
+
+### Home Assistant MQTT Discovery
+
+Full support for Home Assistant MQTT Discovery protocol:
+- **Climate devices** (thermostats, AC units, heaters)
+- **Sensors** (temperature, humidity, power, etc.)
+- **Binary sensors** (motion, door, window, etc.)
+- **Switches, lights, fans**
+- **Covers** (blinds, curtains, garage doors)
+- **Locks, alarms, vacuums**
+- **Humidifiers, water heaters, lawn mowers**
+
+All devices auto-discovered and controllable with `device.set()`.
+
+Example - Control Madoka climate:
+```lua
+-- Turn on heating
+device.set("ha/madoka_living_room", {
+    hvac_mode = "heat",
+    temperature = 22
+})
+
+-- React to temperature changes
+-- config/events/device/ha/madoka_living_room/current_temperature/on_change.lua
+local temp = tonumber(event.data.current_temperature)
+if temp < 18 then
+    log.warn("Too cold! Current: " .. temp .. "°C")
+end
+```
+
 ## Configuration
 
 ### MQTT Broker
