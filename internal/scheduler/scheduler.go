@@ -133,6 +133,8 @@ func (s *Scheduler) run() {
 }
 
 func (s *Scheduler) checkTimeEvents(now time.Time) {
+	now = now.In(s.location)
+
 	minute := now.Minute()
 	hour := now.Hour()
 	day := now.Day()
@@ -281,43 +283,56 @@ func (s *Scheduler) checkTimers(now time.Time) {
 
 // executeTimerCallback executes a timer callback in a goroutine
 func (s *Scheduler) executeTimerCallback(timer *Timer) {
-	// For non-recurring timers, release state after execution
+	post := func() {}
 	if !timer.Recurring {
-		defer func() {
-			// Decrement timer count in Lua state
-			if timer.State != nil {
-				timerCount := timer.State.GetGlobal("__timer_count__")
-				count := 1 // default if not set
-				if timerCount != lua.LNil {
-					if num, ok := timerCount.(lua.LNumber); ok {
-						count = int(num)
-					}
-				}
-				count--
+		post = func() {
+			if timer.State == nil {
+				return
+			}
 
-				if count > 0 {
-					// Still have active timers, just update count
-					timer.State.SetGlobal("__timer_count__", lua.LNumber(count))
-					logger.Debug("Lua state %p has %d remaining timer(s)", timer.State, count)
-				} else {
-					// Last timer completed, release the state
-					timer.State.SetGlobal("__timer_count__", lua.LNumber(0))
-					logger.Debug("Lua state %p last timer completed, releasing state", timer.State)
-					s.releaseTimerState(timer)
+			timerCount := timer.State.GetGlobal("__timer_count__")
+			count := 1 // default if not set
+			if timerCount != lua.LNil {
+				if num, ok := timerCount.(lua.LNumber); ok {
+					count = int(num)
 				}
 			}
-		}()
+			count--
+
+			if count > 0 {
+				timer.State.SetGlobal("__timer_count__", lua.LNumber(count))
+				logger.Debug("Lua state %p has %d remaining timer(s)", timer.State, count)
+				return
+			}
+
+			timer.State.SetGlobal("__timer_count__", lua.LNumber(0))
+			logger.Debug("Lua state %p last timer completed, releasing state", timer.State)
+			s.releaseTimerState(timer)
+		}
 	}
 
+	if executor, ok := s.executor.(interface {
+		ExecuteCallbackWithPost(callback *lua.LFunction, L *lua.LState, timerID string, post func()) error
+	}); ok {
+		if err := executor.ExecuteCallbackWithPost(timer.Callback, timer.State, timer.ID, post); err != nil {
+			logger.Error("Timer %s callback failed: %v", timer.ID, err)
+		}
+		return
+	}
+
+	// Backward compatibility fallback for executors without ExecuteCallbackWithPost.
 	if executor, ok := s.executor.(interface {
 		ExecuteCallback(callback *lua.LFunction, L *lua.LState, timerID string) error
 	}); ok {
 		if err := executor.ExecuteCallback(timer.Callback, timer.State, timer.ID); err != nil {
 			logger.Error("Timer %s callback failed: %v", timer.ID, err)
+			return
 		}
-	} else {
-		logger.Error("Executor does not support ExecuteCallback")
+		post()
+		return
 	}
+
+	logger.Error("Executor does not support ExecuteCallback")
 }
 
 // releaseTimerState releases the Lua state reference for a timer
@@ -426,14 +441,14 @@ func (s *Scheduler) updateSunTimes(now time.Time) {
 		return
 	}
 
-	// SunriseSunset returns UTC time, convert to local
+	// SunriseSunset returns UTC time, convert to configured scheduler location.
 	sunrise, sunset := sunrise.SunriseSunset(
 		s.latitude, s.longitude,
 		now.Year(), now.Month(), now.Day(),
 	)
 
-	s.sunriseTime = sunrise.Local()
-	s.sunsetTime = sunset.Local()
+	s.sunriseTime = sunrise.In(s.location)
+	s.sunsetTime = sunset.In(s.location)
 
 	logger.Info("Calculated sun times for %s: sunrise %02d:%02d, sunset %02d:%02d",
 		now.Format("2006-01-02"),

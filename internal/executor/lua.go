@@ -202,6 +202,12 @@ func (e *Executor) Execute(scriptPath string, event *types.Event) error {
 
 // ExecuteCallback runs a serialized Lua callback function
 func (e *Executor) ExecuteCallback(callback *lua.LFunction, L *lua.LState, timerID string) error {
+	return e.ExecuteCallbackWithPost(callback, L, timerID, nil)
+}
+
+// ExecuteCallbackWithPost runs a serialized Lua callback and an optional post hook
+// under the same state lock.
+func (e *Executor) ExecuteCallbackWithPost(callback *lua.LFunction, L *lua.LState, timerID string, post func()) error {
 	// Safety checks
 	if callback == nil {
 		return fmt.Errorf("callback is nil for timer %s", timerID)
@@ -239,6 +245,10 @@ func (e *Executor) ExecuteCallback(callback *lua.LFunction, L *lua.LState, timer
 
 	if err != nil {
 		return fmt.Errorf("timer %s callback error: %w", timerID, err)
+	}
+
+	if post != nil {
+		post()
 	}
 
 	logger.Debug("Timer %s released lock on Lua state %p", timerID, L)

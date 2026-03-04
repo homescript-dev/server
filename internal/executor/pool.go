@@ -20,6 +20,8 @@ type Pool struct {
 	wg        sync.WaitGroup
 	stopOnce  sync.Once
 	stopChan  chan struct{}
+	mu        sync.RWMutex
+	stopped   bool
 }
 
 // NewPool creates a new worker pool
@@ -43,6 +45,14 @@ func (p *Pool) Start() {
 
 // Submit adds a task to the queue
 func (p *Pool) Submit(task Task) {
+	p.mu.RLock()
+	stopped := p.stopped
+	p.mu.RUnlock()
+	if stopped {
+		logger.Warn("Pool is stopped, task rejected")
+		return
+	}
+
 	select {
 	case p.taskQueue <- task:
 		// Task queued successfully
@@ -56,8 +66,11 @@ func (p *Pool) Submit(task Task) {
 // Stop gracefully shuts down the pool
 func (p *Pool) Stop() {
 	p.stopOnce.Do(func() {
+		p.mu.Lock()
+		p.stopped = true
 		close(p.stopChan)
-		close(p.taskQueue)
+		p.mu.Unlock()
+
 		p.wg.Wait()
 		logger.Debug("Worker pool stopped")
 	})

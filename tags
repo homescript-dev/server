@@ -1,0 +1,58 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	5.8	//
+BINARY_NAME	Makefile	/^BINARY_NAME=homescript-server$/;"	m
+CONFIG_DIR	Makefile	/^CONFIG_DIR=.\/config$/;"	m
+DATA_DIR	Makefile	/^DATA_DIR=.\/data$/;"	m
+DOCKER_IMAGE	Makefile	/^DOCKER_IMAGE=homescript-server:latest$/;"	m
+MQTT_BROKER	Makefile	/^MQTT_BROKER=tcp:\/\/localhost:1883$/;"	m
+clamp	config/lib/color_helpers.lua	/^    local function clamp(v)$/;"	f
+color.describe_color	config/lib/color_helpers.lua	/^function color.describe_color(color_value)$/;"	f
+color.xy_to_hsv	config/lib/color_helpers.lua	/^function color.xy_to_hsv(x, y)$/;"	f
+color.xy_to_rgb	config/lib/color_helpers.lua	/^function color.xy_to_rgb(x, y, brightness)$/;"	f
+detect_off	config/events/device/frigate/porch/actions/detect_off.lua	/^function detect_off()$/;"	f
+detect_on	config/events/device/frigate/porch/actions/detect_on.lua	/^function detect_on()$/;"	f
+disable	config/events/device/frigate/porch/actions/disable.lua	/^function disable()$/;"	f
+enable	config/events/device/frigate/porch/actions/enable.lua	/^function enable()$/;"	f
+frigate.describe_activity	config/lib/frigate_helpers.lua	/^function frigate.describe_activity(data)$/;"	f
+frigate.filter_by_confidence	config/lib/frigate_helpers.lua	/^function frigate.filter_by_confidence(objects, min_confidence)$/;"	f
+frigate.filter_by_type	config/lib/frigate_helpers.lua	/^function frigate.filter_by_type(objects, object_type)$/;"	f
+frigate.format_object	config/lib/frigate_helpers.lua	/^function frigate.format_object(obj)$/;"	f
+frigate.get_activity_summary	config/lib/frigate_helpers.lua	/^function frigate.get_activity_summary(data)$/;"	f
+frigate.get_best_object	config/lib/frigate_helpers.lua	/^function frigate.get_best_object(objects)$/;"	f
+frigate.get_objects_in_zone	config/lib/frigate_helpers.lua	/^function frigate.get_objects_in_zone(objects, zone_name)$/;"	f
+frigate.has_object	config/lib/frigate_helpers.lua	/^function frigate.has_object(objects, object_type)$/;"	f
+frigate.in_zone	config/lib/frigate_helpers.lua	/^function frigate.in_zone(obj, zone_name)$/;"	f
+frigate.is_new_detection	config/lib/frigate_helpers.lua	/^function frigate.is_new_detection(new_objects, old_objects)$/;"	f
+frigate.log_objects	config/lib/frigate_helpers.lua	/^function frigate.log_objects(objects)$/;"	f
+improve_contrast	config/events/device/frigate/porch/actions/improve_contrast.lua	/^function improve_contrast()$/;"	f
+motion_contour_area	config/events/device/frigate/porch/actions/motion_contour_area.lua	/^function motion_contour_area()$/;"	f
+motion_off	config/events/device/frigate/porch/actions/motion_off.lua	/^function motion_off()$/;"	f
+motion_on	config/events/device/frigate/porch/actions/motion_on.lua	/^function motion_on()$/;"	f
+motion_threshold	config/events/device/frigate/porch/actions/motion_threshold.lua	/^function motion_threshold()$/;"	f
+ptz_autotracker	config/events/device/frigate/porch/actions/ptz_autotracker.lua	/^function ptz_autotracker()$/;"	f
+recordings_off	config/events/device/frigate/porch/actions/recordings_off.lua	/^function recordings_off()$/;"	f
+recordings_on	config/events/device/frigate/porch/actions/recordings_on.lua	/^function recordings_on()$/;"	f
+set_fan_mode	config/events/device/ha/madoka_living_room/actions/set_fan_mode.lua	/^function set_fan_mode()$/;"	f
+set_hvac_mode	config/events/device/ha/madoka_living_room/actions/set_hvac_mode.lua	/^function set_hvac_mode()$/;"	f
+set_preset_mode	config/events/device/ha/madoka_living_room/actions/set_preset_mode.lua	/^function set_preset_mode()$/;"	f
+set_temperature	config/events/device/ha/madoka_living_room/actions/set_temperature.lua	/^function set_temperature()$/;"	f
+snapshots_off	config/events/device/frigate/porch/actions/snapshots_off.lua	/^function snapshots_off()$/;"	f
+snapshots_on	config/events/device/frigate/porch/actions/snapshots_on.lua	/^function snapshots_on()$/;"	f
+toggle	config/events/device/entrance/actions/toggle.lua	/^function toggle()$/;"	f
+toggle	config/events/device/living_room_lamp/actions/toggle.lua	/^function toggle()$/;"	f
+toggle	config/events/device/outside_lights/actions/toggle.lua	/^function toggle()$/;"	f
+toggle	config/events/device/porch/actions/toggle.lua	/^function toggle()$/;"	f
+turn_off	config/events/device/entrance/actions/turn_off.lua	/^function turn_off()$/;"	f
+turn_off	config/events/device/ha/madoka_living_room/actions/turn_off.lua	/^function turn_off()$/;"	f
+turn_off	config/events/device/living_room_lamp/actions/turn_off.lua	/^function turn_off()$/;"	f
+turn_off	config/events/device/outside_lights/actions/turn_off.lua	/^function turn_off()$/;"	f
+turn_off	config/events/device/porch/actions/turn_off.lua	/^function turn_off()$/;"	f
+turn_on	config/events/device/entrance/actions/turn_on.lua	/^function turn_on()$/;"	f
+turn_on	config/events/device/ha/madoka_living_room/actions/turn_on.lua	/^function turn_on()$/;"	f
+turn_on	config/events/device/living_room_lamp/actions/turn_on.lua	/^function turn_on()$/;"	f
+turn_on	config/events/device/outside_lights/actions/turn_on.lua	/^function turn_on()$/;"	f
+turn_on	config/events/device/porch/actions/turn_on.lua	/^function turn_on()$/;"	f

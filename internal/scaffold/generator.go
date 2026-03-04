@@ -315,15 +315,30 @@ func generateActionScript(dev *types.Device, action string) string {
 
 	switch action {
 	case "turn_on":
-		actionCode = `device.set("` + dev.ID + `", {state = "ON"})`
+		if dev.Type == "climate" {
+			actionCode = `device.set("` + dev.ID + `", {hvac_mode = "heat"})`
+		} else {
+			actionCode = `device.set("` + dev.ID + `", {state = "ON"})`
+		}
 		description = "Turn on " + dev.ID
 	case "turn_off":
-		actionCode = `device.set("` + dev.ID + `", {state = "OFF"})`
+		if dev.Type == "climate" {
+			actionCode = `device.set("` + dev.ID + `", {hvac_mode = "off"})`
+		} else {
+			actionCode = `device.set("` + dev.ID + `", {state = "OFF"})`
+		}
 		description = "Turn off " + dev.ID
 	case "toggle":
-		actionCode = `local current = device.get("` + dev.ID + `")
-    local new_state = (current.state == "ON") and "OFF" or "ON"
-    device.set("` + dev.ID + `", {state = new_state})`
+		if dev.Type == "climate" {
+			actionCode = `local current = device.get("` + dev.ID + `")
+	    local mode = string.lower(tostring(current.hvac_mode or "off"))
+	    local new_mode = (mode == "off") and "heat" or "off"
+	    device.set("` + dev.ID + `", {hvac_mode = new_mode})`
+		} else {
+			actionCode = `local current = device.get("` + dev.ID + `")
+	    local new_state = (current.state == "ON") and "OFF" or "ON"
+	    device.set("` + dev.ID + `", {state = new_state})`
+		}
 		description = "Toggle " + dev.ID + " state"
 
 	// Home Assistant climate actions

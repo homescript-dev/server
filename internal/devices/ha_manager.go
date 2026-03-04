@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"homescript-server/internal/logger"
 	"homescript-server/internal/types"
+	"strings"
 	"sync"
 	"time"
 
@@ -90,8 +91,9 @@ func (h *HADeviceManager) Set(deviceID string, attrs map[string]interface{}) err
 func (h *HADeviceManager) getCommandTopicAndPayload(config *types.HomeAssistantDiscovery, attr string, value interface{}) (string, []byte) {
 	var topic string
 	var payload []byte
+	attrKey := strings.ToLower(strings.TrimSpace(attr))
 
-	switch attr {
+	switch attrKey {
 	// Climate attributes
 	case "temperature", "target_temperature":
 		topic = config.TemperatureCommandTopic
@@ -155,21 +157,44 @@ func (h *HADeviceManager) getCommandTopicAndPayload(config *types.HomeAssistantD
 
 	// Generic state/command
 	case "state":
-		topic = config.CommandTopic
-		if b, ok := value.(bool); ok {
-			if b {
-				payload = []byte(config.PayloadOn)
-				if payload == nil || len(payload) == 0 {
-					payload = []byte("ON")
+		// Generic entities usually use CommandTopic, but climate-like entities often
+		// expose only ModeCommandTopic. Support both.
+		if config.CommandTopic != "" {
+			topic = config.CommandTopic
+			if b, ok := value.(bool); ok {
+				if b {
+					payload = []byte(config.PayloadOn)
+					if payload == nil || len(payload) == 0 {
+						payload = []byte("ON")
+					}
+				} else {
+					payload = []byte(config.PayloadOff)
+					if payload == nil || len(payload) == 0 {
+						payload = []byte("OFF")
+					}
 				}
 			} else {
-				payload = []byte(config.PayloadOff)
-				if payload == nil || len(payload) == 0 {
-					payload = []byte("OFF")
-				}
+				payload = []byte(fmt.Sprintf("%v", value))
 			}
-		} else {
-			payload = []byte(fmt.Sprintf("%v", value))
+		} else if config.ModeCommandTopic != "" {
+			topic = config.ModeCommandTopic
+			switch v := value.(type) {
+			case bool:
+				if v {
+					payload = []byte("on")
+				} else {
+					payload = []byte("off")
+				}
+			case string:
+				s := strings.TrimSpace(strings.ToLower(v))
+				if s == "" {
+					payload = []byte("off")
+				} else {
+					payload = []byte(s)
+				}
+			default:
+				payload = []byte(strings.ToLower(fmt.Sprintf("%v", value)))
+			}
 		}
 
 	case "command":
